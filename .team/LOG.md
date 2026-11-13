@@ -93,6 +93,17 @@
 - 이미 로컬 SQL Server 컨테이너(`scheduler-meta-db`)에 수정 전 V1/V2가 적용돼 있던 상태라, 컨테이너를 내리고 새로 띄운 뒤 `scheduler_meta` DB를 재생성해 V1(수정판)→V2를 처음부터 깨끗하게 재적용 — "Successfully applied 2 migrations... now at version v2" 확인, `target_db_config` 컬럼 목록에 `db_type` 없음을 `INFORMATION_SCHEMA.COLUMNS` 조회로 확인, Quartz도 정상 기동 확인.
 - DoD 재점검: 마이그레이션 깨끗하게 적용 + 실행이력 테이블 없음 + `db_type` 컬럼 없음, 3가지 모두 확인됨.
 
+## 2026-11-13 — T4 도메인 모델 + Repository 인터페이스/구현 (worker)
+- `domain/schedule`: `ActionType`(API_CALL/DISPLAY_ONLY), `GroupingMode`(PER_ROW/GROUP_BY), `ParamDataType`, `ValueSource`(LITERAL/CURRENT_DATE/CURRENT_DATETIME) enum + `ScheduleDefinition`/`ScheduleParameter` record(불변 값 객체) + `ScheduleRepository`/`ScheduleParameterRepository` 인터페이스. `ScheduleDefinition.actionConfig`는 원본 JSON 문자열로 보관(actionType별로 모양이 다르므로 파싱은 아는 쪽에서).
+- `domain/config`: `TargetDbConfig`(db_type 없음, §4.3 반영)/`Credential` record + 해당 Repository 인터페이스. `domain/admin`: `AdminUser` record + `AdminUserRepository`(T11 부트스트랩 시드용 `existsAny()` 포함).
+- `action_config` JSON↔Java 매핑: `ApiCallActionConfig`/`DisplayOnlyActionConfig` record + `ActionConfigJson`(Jackson 기반 write/read 유틸, action_type별 타입 지정).
+- `infra/persistence/jdbc`: `JdbcScheduleRepository`/`JdbcScheduleParameterRepository`/`JdbcTargetDbConfigRepository`/`JdbcCredentialRepository`/`JdbcAdminUserRepository` — `NamedParameterJdbcTemplate` + 수동 `RowMapper`(ORM 없음, 레거시 매핑 스타일 유지). `schedule_parameter.replaceAll`은 delete-then-bulk-insert로 "통째 교체"(PLAN §6) 구현.
+- **테스트**: `AbstractRepositoryIntegrationTest`(`@SpringBootTest` + Testcontainers MSSQLServerContainer) 위에 5개 Repository 통합테스트(CRUD+JSON 왕복 검증 포함, `JdbcScheduleRepositoryTest`가 API_CALL/DISPLAY_ONLY 양쪽 action_config 왕복까지 검증) + `ActionConfigJsonTest`(Spring/DB 없는 순수 단위테스트, equals 기반 왕복검증) 작성.
+- **버그 발견 및 수정(테스트 인프라)**: 처음엔 테스트 5개 클래스 각각이 `@Container` static 필드를 **추상 베이스 클래스**에 선언했는데, Java에서 상위클래스의 static 필드는 서브클래스별로 복제되지 않고 단 하나만 존재 — `@Testcontainers` JUnit5 확장의 클래스별 start/stop 훅과 뒤섞이면서 컨테이너가 중간에 내려가거나 Spring 컨텍스트 생성과 경합해 "Connection refused" 산발적 실패(테스트 스위트 전체가 수 분씩 걸리고 들쑥날쑥하게 깨짐)가 발생함. Testcontainers 공식 "싱글톤 컨테이너" 패턴(static 초기화 블록에서 1회만 `start()`, `@Testcontainers`/`@Container` 애너테이션 제거)으로 교체해 해결 — 전체 테스트가 32초로 안정적으로 끝남을 재확인(이전엔 같은 스위트가 두 번 겹쳐 돌았을 때 최대 수백 초까지 걸리며 실패했었음).
+- **테스트 설계 버그 1건 추가 발견/수정**: `JdbcAdminUserRepositoryTest.existsAnyReflectsRowCount`가 "테이블이 비어있다"를 전제했는데, 싱글톤 컨테이너로 스키마를 테스트 클래스 간 공유하게 되면서 다른 테스트가 이미 넣은 행 때문에 깨짐 → "최소 1건 저장 후 true"만 검증하도록 테스트 의도 수정(실제 버그는 테스트 쪽, 구현 쪽 아님).
+- DoD 점검: `mvn test` 전체 21개 테스트 그린(`BUILD SUCCESS`) 확인(저장→조회 필드 일치, action_config JSON 왕복 정확성 포함). `mvn clean package` 최종 재확인 성공.
+- 다음 작업: T5 (비밀값 암복호화 `infra/crypto`).
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.

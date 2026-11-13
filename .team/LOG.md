@@ -124,6 +124,16 @@
 - DoD 점검: `mvn test` 전체 42개 테스트 그린. `mvn clean package` 재확인 성공.
 - 다음 작업: T7 (Quartz 연동 — 동적 등록/해제).
 
+## 2026-11-13 — T7 Quartz 연동 — 동적 등록/해제 (worker)
+- `engine/quartz/QuartzConfig`: Quartz JDBC JobStore 자체는 이미 `application.yml`의 `spring.quartz.*`(T1/T3) + Flyway `QRTZ_*`(T3)로 동작 확인됨. 이번에 추가한 것은 `SchedulerFactoryBeanCustomizer` + `AutowiringSpringBeanJobFactory` — Quartz는 Job 인스턴스를 리플렉션으로 직접 생성해 Spring 컨테이너를 거치지 않으므로, 이 커스텀 JobFactory 없이는 `GenericScheduleJob`의 `@Autowired ScheduleExecutor`가 항상 null이 됨(Spring Boot Quartz 자동구성이 기본 제공하지 않는 부분).
+- `engine/quartz/GenericScheduleJob`(`@DisallowConcurrentExecution`, `Component` 아님 — Quartz가 직접 생성하므로 Spring 빈으로 등록하면 쓰이지 않는 별개 인스턴스가 생길 뿐): `JobDataMap`에서 `scheduleId`만 꺼내 `ScheduleExecutor.execute(id, SCHEDULED)` 호출, `ScheduleAlreadyRunningException`은 로그만 남기고 삼킴(수동실행이 이미 돌고 있는 정상 상황).
+- `engine/quartz/ScheduleRegistrar`: `register(ScheduleDefinition)`가 기존 Job을 먼저 지우고(멱등) `enabled=false`면 거기서 끝(트리거 생성 안 함), `enabled=true`면 `CronScheduleBuilder` + `TriggerBuilder`로 재생성 — "생성/수정/활성화토글" 전부 이 메서드 하나로 커버. `unregister(scheduleId)`는 `deleteJob`.
+- `engine/quartz/ScheduleBootstrapRunner`(`ApplicationRunner`): 기동 시 `scheduleRepository.findAllEnabled()`를 전부 `scheduleRegistrar.register(...)`에 넘김 — 레거시 `SchedulerContextListener.contextInitialized()`의 3개 하드코딩 호출을 대체.
+- **버그 발견/수정**: `ScheduleRegistrar`/테스트 전반에 쓴 cron 문자열("0 0 9 * * MON", "0 0/30 * * * MON-FRI" 등, PLAN.md §8 예시와 동일한 모양)이 실제로 Quartz에 등록을 시도하자(T6까지는 cron을 실제로 파싱하는 코드가 없어서 안 드러났음) `CronExpression` 파싱 에러로 전부 깨짐 — Quartz cron은 "일(day-of-month)"과 "요일(day-of-week)" 둘 다 구체값을 줄 수 없고 한쪽은 반드시 `?`여야 함(Unix cron과 다른 Quartz 고유 규칙). 요일이 지정된 모든 테스트 cron을 `*` → `?`(day-of-month 자리)로 교정(`"0 0 9 ? * MON"`, `"0 0/30 * ? * MON-FRI"` 등). **참고**: PLAN.md §5/§8의 cron 예시 문구도 같은 모양(day-of-month에 `*`)을 쓰고 있어 Quartz에 그대로 넣으면 똑같이 깨짐 — PLAN 자체를 임의로 고치지 않고 여기 LOG에만 기록, 실제 운영 문서/가이드(T8 cron 유효성 검증, README 등) 작성 시 `org.quartz.CronExpression.isValidExpression(...)`로 검증하도록 챙길 것.
+- 테스트: `ScheduleRegistrarIntegrationTest`(새 Testcontainers MSSQL 싱글톤 베이스, 이번엔 `spring.quartz.auto-startup` 기본값(true) 유지 — 실제 `Scheduler` 빈으로 트리거 상태 확인) — register→`CronExpression.getNextValidTimeAfter`로 독립 계산한 다음발화시각과 정확히 일치 확인, unregister→`checkExists`/`getTrigger` 둘 다 사라짐 확인, cron 변경 재등록→다음발화시각이 실제로 바뀜 확인, `enabled=false`로 register→트리거 생성 안 됨 확인. `ScheduleBootstrapRunnerTest`(Mockito 순수 단위테스트)로 "enabled 스케줄 전체에 대해 register 호출" 로직만 분리 검증(실제 앱기동 시점에 DB에 미리 행을 넣어두고 통합적으로 검증하는 것은 Flyway 마이그레이션도 같은 컨텍스트 기동 과정에서 돌기 때문에 사실상 불가능 — "Quartz에 넣으면 cron과 다음발화시각이 맞다"는 `ScheduleRegistrar` 통합테스트가, "enabled 스케줄을 찾아 register를 호출한다"는 이 단위테스트가 각각 나눠서 검증).
+- DoD 점검: `mvn test` 전체 48개 테스트 그린. `mvn clean package` 재확인 성공.
+- 다음 작업: T8 (관리자 REST API — 스케줄 CRUD + 파라미터).
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.

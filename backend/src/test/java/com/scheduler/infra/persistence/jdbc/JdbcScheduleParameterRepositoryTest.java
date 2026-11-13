@@ -36,7 +36,7 @@ class JdbcScheduleParameterRepositoryTest extends AbstractRepositoryIntegrationT
         ));
 
         ScheduleDefinition schedule = scheduleRepository.save(new ScheduleDefinition(
-                null, "Parameterized schedule", true, "0 0 9 * * MON", "Asia/Seoul",
+                null, "Parameterized schedule", true, "0 0 9 ? * MON", "Asia/Seoul",
                 "SP_SAMPLE_WITH_PARAMS", config.id(), ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig("TABLE", null)),
                 null, null, null, "tester"

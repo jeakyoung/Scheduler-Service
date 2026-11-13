@@ -246,7 +246,7 @@ class ScheduleExecutorTest {
 
     private ScheduleDefinition displayOnlySchedule() {
         return new ScheduleDefinition(
-                SCHEDULE_ID, "Display only test", true, "0 0 9 * * MON", "Asia/Seoul",
+                SCHEDULE_ID, "Display only test", true, "0 0 9 ? * MON", "Asia/Seoul",
                 "SP_SAMPLE", TARGET_DB_CONFIG_ID, ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig(null, null)),
                 null, null, null, "tester"
@@ -264,7 +264,7 @@ class ScheduleExecutorTest {
                 groupingMode, groupByField, bodyTemplate
         );
         return new ScheduleDefinition(
-                SCHEDULE_ID, "API call test", true, "0 0/30 * * * MON-FRI", "Asia/Seoul",
+                SCHEDULE_ID, "API call test", true, "0 0/30 * ? * MON-FRI", "Asia/Seoul",
                 "SP_SAMPLE", TARGET_DB_CONFIG_ID, ActionType.API_CALL,
                 ActionConfigJson.write(config),
                 null, null, null, "tester"

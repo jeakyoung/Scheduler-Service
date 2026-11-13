@@ -49,7 +49,7 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
                 null,
                 "Hourly notice",
                 true,
-                "0 0/30 * * * MON-FRI",
+                "0 0/30 * ? * MON-FRI",
                 "Asia/Seoul",
                 "SP_SAMPLE_NOTICE_LIST",
                 targetDbConfigId,
@@ -62,7 +62,7 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
         ScheduleDefinition reloaded = repository.findById(saved.id()).orElseThrow();
         assertThat(reloaded.name()).isEqualTo("Hourly notice");
         assertThat(reloaded.enabled()).isTrue();
-        assertThat(reloaded.cronExpression()).isEqualTo("0 0/30 * * * MON-FRI");
+        assertThat(reloaded.cronExpression()).isEqualTo("0 0/30 * ? * MON-FRI");
         assertThat(reloaded.actionType()).isEqualTo(ActionType.API_CALL);
         assertThat(reloaded.targetDbConfigId()).isEqualTo(targetDbConfigId);
 
@@ -84,7 +84,7 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
                 null,
                 "Display only sample",
                 false,
-                "0 30 8 * * MON-FRI",
+                "0 30 8 ? * MON-FRI",
                 "Asia/Seoul",
                 "SP_SAMPLE_DISPLAY",
                 targetDbConfigId,
@@ -136,7 +136,7 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
                 null,
                 name,
                 enabled,
-                "0 0 9 * * MON",
+                "0 0 9 ? * MON",
                 "Asia/Seoul",
                 "SP_SAMPLE",
                 targetDbConfigId,

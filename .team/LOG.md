@@ -134,9 +134,30 @@
 - DoD 점검: `mvn test` 전체 48개 테스트 그린. `mvn clean package` 재확인 성공.
 - 다음 작업: T8 (관리자 REST API — 스케줄 CRUD + 파라미터).
 
+## 2026-11-13 — 인증 방식 결정 (사용자 직접 지시) + T8~T14 계속 진행 지시
+- 사용자가 T11의 인증 방식을 **토큰(JWT) 기반**으로 명시적으로 확정: 세션 쿠키 방식은 쓰지 않음(SPA가 다른 오리진이라 SameSite=None+Secure+CORS Allow-Credentials+CSRF까지 다 갖춰야 하는데, 단일 관리자 역할의 내부 어드민 도구 규모에는 불필요한 복잡도). 로그인 성공 시 JWT 발급, 프론트는 `Authorization: Bearer` 헤더로 호출(메모리 보관 권장, localStorage 영구저장 지양 — 구현 디테일은 worker 판단), Spring Security는 stateless(세션 미사용)로 구성. 이 결정으로 T11 진행 가능해짐.
+- 다음 지시: T8(스케줄 CRUD API) → T9(즉시실행/최근결과 API) → T10(대상DB/자격증명 API) → T11(인증+CORS 최종) → T12(React 실제화면) → T13(비밀값 최종점검) → T14(테스트 정리)까지 계속 진행, 기존 원칙(DoD→commit→LOG) 유지.
+
+## 2026-11-13 — T8 관리자 REST API — 스케줄 CRUD + 파라미터 (worker)
+- `engine/quartz/ScheduleRegistrar`에 `getNextFireTime(scheduleId)`(컨트롤러의 "다음 실행시각" 노출용) 추가, `engine/execution/ScheduleExecutor`에 `isRunning(scheduleId)`(T9 상태 API에서 쓸 예정) 추가 — 둘 다 PLAN §6 응답 필드에 필요해서 이번에 같이 추가.
+- `web/api/dto`: `ScheduleRequest`(actionConfig는 `JsonNode`로 받아 타입별 검증 후 문자열로 직렬화), `ScheduleResponse`(actionConfig를 `JsonNode`로 역직렬화해 돌려줌, `nextFireTime`/`parameters` 포함 — `parameters`는 목록(list) 엔드포인트에서는 N+1 방지로 빈 리스트, 단건 조회에서만 실제 채움), `ScheduleParameterRequest`/`Response`, `EnabledRequest`.
+- `web/api/ActionConfigRequestValidator`: `action_type`별 `action_config` 모양 검증(API_CALL인데 `url`/`method`/`groupingMode` 없음 → 400, `GROUP_BY`인데 `groupByField` 없음 → 400). `web/api/ApiExceptionHandler`(`@RestControllerAdvice`): `IllegalArgumentException`/빈 검증 실패 → 400, `ScheduleNotFoundException` → 404, `ScheduleAlreadyRunningException`(T9에서 쓰일 예정) → 409.
+- `web/api/ScheduleController`: PLAN §6 스케줄 CRUD 6개 엔드포인트(GET 목록/단건, POST, PUT, DELETE, PATCH enabled) 전부 구현 — 생성/수정/삭제/토글마다 `scheduleRegistrar.register()`/`unregister()`로 Quartz 즉시 동기화. cron 유효성은 `org.quartz.CronExpression.isValidExpression(...)`로 검증(T7에서 발견한 Quartz cron 고유 규칙 — day-of-month/day-of-week 중 하나는 `?` — 이게 바로 400으로 잡힘).
+- `web/api/ScheduleParameterController`: `PUT /api/schedules/{id}/parameters`(통째 교체) — `LITERAL`인데 `literalValue` 없음, 또는 `dataType`에 안 맞는 literal(예: INT에 "not-a-number")은 `SpParameterResolver.resolve(...)`를 그대로 재사용해 파싱 실패를 400으로 변환(파싱 로직 중복 없음).
+- `updatedBy`는 아직 인증이 없어(T11 전) 이번 라운드에선 `null`로 둠 — T11에서 인증 붙이면 돌아와서 `SecurityContext`의 로그인 계정명을 채우도록 보강 예정(메모 남김).
+- 테스트: `ScheduleControllerTest`(MockMvc + `AbstractQuartzIntegrationTest` 상속, 실제 Quartz `Scheduler` 빈으로 검증) — 생성 시 201+Quartz 트리거 실제 등록, API_CALL인데 url 없음→400, 잘못된 cron→400, 단건 조회에 파라미터 임베드 확인, **수정 시 Quartz 다음발화시각이 실제로 바뀜** 확인(DoD 명시 항목), enabled 토글이 Quartz Job add/remove로 실제 반영됨 확인, 삭제 시 스케줄+Quartz Job 둘 다 사라짐 확인, 파라미터 잘못된 literal→400 확인.
+- DoD 점검: `mvn test` 전체 56개 테스트 그린(새 테스트 8개 모두 1회차에 통과). `mvn clean package` 재확인 성공.
+- 다음 작업: T9 (관리자 REST API — 즉시실행 + 최근결과 조회).
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.
 - 사용자에게 "SP를 생성하거나 호출하거나"의 '생성'이 업체 DB에 신규 SP를 만드는(DDL) 기능까지 의미하는지 확인 질문 → 사용자 답변: **"의미 없을 것 같다, DDL 생성안은 보류"** → 엔진은 기존에 만들어진 SP를 호출만 한다는 기존 전제 유지, SP 생성/DDL 기능은 범위 제외로 명시 확정.
 - 영향: PLAN.md §4.3(`target_db_config`에서 `db_type` 컬럼 제거, MSSQL 전제 명시), §9(범위 밖 목록에 "대상 업무 DB에 대한 DDL/SP 생성 기능 — 호출만 지원" 추가), TASKS.md 해당 작업 설명 업데이트.
 - sched-worker가 T3(메타DB 마이그레이션)을 완료하고 커밋 직전(staged, uncommitted) 상태였는데 `V1__schedule_core.sql`에 `db_type NVARCHAR(20) DEFAULT 'SQLSERVER'` 컬럼이 포함되어 있어 `esc`로 중단 → idle 확인, 커밋 안 됨(staged 상태) 확인. 다음 단계: sched-planner에게 PLAN.md §4.3/§9 수정 지시 → sched-worker에게 마이그레이션 파일에서 db_type 제거 후 T3 커밋부터 이어서 진행 지시.
+
+## 2026-11-13 11:4x — T3~T7 완료, 인증 방식(토큰 vs 세션) 결정
+- sched-planner가 db_type 제거 반영(PLAN.md §1/§4.3/§9/도입부), sched-worker가 마이그레이션 수정 후 T3 재검증·커밋(`b5d79ee`)부터 TASKS.md 순서대로 연속 진행: T4 도메인모델+Repository(Testcontainers 검증, `e08d047`) → T5 AES-256-GCM 비밀값 암복호화(`48632cd`) → T6 실행엔진 코어(ExecutionResult/Sink/SP호출/액션핸들러/ScheduleExecutor, `ac76889`) → T7 Quartz 동적등록(QuartzConfig/GenericScheduleJob/ScheduleRegistrar, `5abef79`).
+- worker가 T11(인증) 착수 전 "React SPA가 백엔드와 다른 오리진인데 세션 쿠키 vs 토큰 인증 중 뭘 쓸지" 결정이 필요하다며 스스로 멈춤(정당한 아키텍처 결정 포인트).
+- orchestrator가 결정: **토큰(JWT) 기반, stateless**로 확정 — 세션 쿠키 방식은 SameSite/CORS Allow-Credentials/CSRF 방어까지 다 챙겨야 해서 단일 관리자 역할의 내부 어드민 도구 규모에 비해 과함. 로그인 시 JWT 발급 → 프론트가 Authorization: Bearer 헤더로 호출, Spring Security는 세션 미사용(stateless).
+- sched-worker에게 이 결정과 함께 T8(스케줄 CRUD API)~T14(테스트 정리)까지 계속 진행 지시함. 다음 단계: 완료/추가 결정포인트 대기.

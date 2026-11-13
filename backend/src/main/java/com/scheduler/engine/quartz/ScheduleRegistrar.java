@@ -13,6 +13,8 @@ import org.quartz.TriggerKey;
 import org.springframework.stereotype.Component;
 
 import java.time.ZoneId;
+import java.util.Date;
+import java.util.Optional;
 
 /**
  * Thin wrapper around Quartz's scheduleJob/deleteJob, called by admin CRUD (T8) and the
@@ -62,6 +64,16 @@ public class ScheduleRegistrar {
 
     public void reschedule(ScheduleDefinition schedule) {
         register(schedule);
+    }
+
+    /** Used by web/api controllers to surface "next scheduled fire time" (PLAN.md §6). */
+    public Optional<Date> getNextFireTime(long scheduleId) {
+        try {
+            CronTrigger trigger = (CronTrigger) scheduler.getTrigger(triggerKey(scheduleId));
+            return Optional.ofNullable(trigger).map(CronTrigger::getNextFireTime);
+        } catch (SchedulerException e) {
+            throw new QuartzRegistrationException("Failed to read trigger for schedule " + scheduleId, e);
+        }
     }
 
     public void unregister(long scheduleId) {

@@ -58,6 +58,11 @@ public class ScheduleExecutor {
         this.displayOutputStore = displayOutputStore;
     }
 
+    /** Used by web/api's status endpoint (PLAN.md §6) to report "currently running". */
+    public boolean isRunning(long scheduleId) {
+        return runningScheduleIds.containsKey(scheduleId);
+    }
+
     /**
      * @throws ScheduleAlreadyRunningException if this schedule is already executing (either
      *         a SCHEDULED run in progress, or a concurrent MANUAL run-now) - callers (the

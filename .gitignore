@@ -1,0 +1,19 @@
+target/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Local-only config with real secrets - never commit
+application-local.yml
+application-local.yaml
+.env
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

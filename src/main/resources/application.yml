@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: scheduler-service
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  quartz:
+    job-store-type: jdbc
+    jdbc:
+      initialize-schema: never # schema is created by Flyway (V2__quartz_tables.sql), not by Spring Boot
+    properties:
+      org:
+        quartz:
+          jobStore:
+            class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
+            driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+            tablePrefix: QRTZ_
+            isClustered: false
+          scheduler:
+            instanceName: SchedulerServiceQuartz
+
+  thymeleaf:
+    cache: false
+
+server:
+  port: ${SERVER_PORT:8080}
+
+scheduler-service:
+  # Master key for AES-GCM encryption of target_db_config/credential secrets at rest.
+  # Must be a base64-encoded 256-bit (32 byte) key. Generate e.g. with:
+  #   openssl rand -base64 32
+  master-encryption-key: ${MASTER_ENCRYPTION_KEY}
+  initial-admin:
+    username: ${INITIAL_ADMIN_USERNAME:}
+    password: ${INITIAL_ADMIN_PASSWORD:}
+
+logging:
+  level:
+    com.scheduler: INFO

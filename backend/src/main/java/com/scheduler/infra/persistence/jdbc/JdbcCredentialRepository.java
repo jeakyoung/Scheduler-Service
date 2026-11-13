@@ -2,6 +2,7 @@ package com.scheduler.infra.persistence.jdbc;
 
 import com.scheduler.domain.config.Credential;
 import com.scheduler.domain.config.CredentialRepository;
+import com.scheduler.infra.crypto.CredentialCipher;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -17,35 +18,37 @@ import java.util.Optional;
 @Repository
 public class JdbcCredentialRepository implements CredentialRepository {
 
-    private static final RowMapper<Credential> ROW_MAPPER = (rs, rowNum) -> new Credential(
-            rs.getLong("id"),
-            rs.getString("name"),
-            rs.getString("encrypted_value"),
-            rs.getString("description"),
-            toInstant(rs.getTimestamp("updated_at")),
-            rs.getString("updated_by")
-    );
-
     private final NamedParameterJdbcTemplate jdbc;
+    private final CredentialCipher cipher;
+    private final RowMapper<Credential> rowMapper;
 
-    public JdbcCredentialRepository(NamedParameterJdbcTemplate jdbc) {
+    public JdbcCredentialRepository(NamedParameterJdbcTemplate jdbc, CredentialCipher cipher) {
         this.jdbc = jdbc;
+        this.cipher = cipher;
+        this.rowMapper = (rs, rowNum) -> new Credential(
+                rs.getLong("id"),
+                rs.getString("name"),
+                cipher.decrypt(rs.getString("encrypted_value")),
+                rs.getString("description"),
+                toInstant(rs.getTimestamp("updated_at")),
+                rs.getString("updated_by")
+        );
     }
 
     @Override
     public List<Credential> findAll() {
-        return jdbc.query("SELECT * FROM credential ORDER BY id", ROW_MAPPER);
+        return jdbc.query("SELECT * FROM credential ORDER BY id", rowMapper);
     }
 
     @Override
     public Optional<Credential> findById(long id) {
-        return jdbc.query("SELECT * FROM credential WHERE id = :id", new MapSqlParameterSource("id", id), ROW_MAPPER)
+        return jdbc.query("SELECT * FROM credential WHERE id = :id", new MapSqlParameterSource("id", id), rowMapper)
                 .stream().findFirst();
     }
 
     @Override
     public Optional<Credential> findByName(String name) {
-        return jdbc.query("SELECT * FROM credential WHERE name = :name", new MapSqlParameterSource("name", name), ROW_MAPPER)
+        return jdbc.query("SELECT * FROM credential WHERE name = :name", new MapSqlParameterSource("name", name), rowMapper)
                 .stream().findFirst();
     }
 
@@ -54,7 +57,7 @@ public class JdbcCredentialRepository implements CredentialRepository {
         KeyHolder keyHolder = new GeneratedKeyHolder();
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("name", credential.name())
-                .addValue("encryptedValue", credential.encryptedValue())
+                .addValue("encryptedValue", cipher.encrypt(credential.value()))
                 .addValue("description", credential.description())
                 .addValue("updatedBy", credential.updatedBy());
 
@@ -75,7 +78,7 @@ public class JdbcCredentialRepository implements CredentialRepository {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("id", credential.id())
                 .addValue("name", credential.name())
-                .addValue("encryptedValue", credential.encryptedValue())
+                .addValue("encryptedValue", cipher.encrypt(credential.value()))
                 .addValue("description", credential.description())
                 .addValue("updatedBy", credential.updatedBy());
 

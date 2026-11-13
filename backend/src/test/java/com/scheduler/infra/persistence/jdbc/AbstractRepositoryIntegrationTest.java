@@ -36,7 +36,9 @@ public abstract class AbstractRepositoryIntegrationTest {
         registry.add("DB_URL", () -> MSSQL.getJdbcUrl() + ";trustServerCertificate=true;");
         registry.add("DB_USERNAME", MSSQL::getUsername);
         registry.add("DB_PASSWORD", MSSQL::getPassword);
-        registry.add("MASTER_ENCRYPTION_KEY", () -> "dGVzdC1tYXN0ZXIta2V5LXBsYWNlaG9sZGVyLTEyMzQ1Ng==");
+        // 32 zero bytes, base64-encoded - a valid AES-256 key shape for tests only (CredentialCipher
+        // requires exactly 32 decoded bytes; this is not used for anything beyond throwaway test data).
+        registry.add("MASTER_ENCRYPTION_KEY", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
         registry.add("spring.quartz.auto-startup", () -> "false");
     }
 }

@@ -104,6 +104,15 @@
 - DoD 점검: `mvn test` 전체 21개 테스트 그린(`BUILD SUCCESS`) 확인(저장→조회 필드 일치, action_config JSON 왕복 정확성 포함). `mvn clean package` 최종 재확인 성공.
 - 다음 작업: T5 (비밀값 암복호화 `infra/crypto`).
 
+## 2026-11-13 — T5 비밀값 암복호화 (worker)
+- `infra/crypto/CredentialCipher`: AES-256-GCM, 매 암호화마다 랜덤 IV 생성 후 `IV+ciphertext`를 base64 1개 문자열로 묶어 저장(복호화 시 앞 12바이트를 IV로 분리). 마스터키(`MASTER_ENCRYPTION_KEY`, base64)가 없거나/base64가 아니거나/디코딩 결과가 32바이트(AES-256)가 아니면 생성자에서 즉시 `IllegalStateException`으로 fail-fast(명확한 에러 메시지 포함) — Spring이 `${MASTER_ENCRYPTION_KEY}` 자체를 못 찾는 경우는 플레이스홀더 해석 단계에서 더 먼저 실패하고, 값이 있지만 형식이 틀린 경우는 이 생성자 검증이 잡음.
+- **T4 설계 보강**: T4에서 `TargetDbConfig.encryptedPassword`/`Credential.encryptedValue` 필드가 "암호문을 그대로 들고 있는 값객체"처럼 설계돼 있었는데, TASKS.md T5가 "Repository 구현체가 저장 시 암호화, 조회 시 복호화"를 요구하므로 도메인 경계에선 평문이어야 함이 맞다고 판단 → 필드명을 `password`/`value`(평문)로 리네이밍하고, `JdbcTargetDbConfigRepository`/`JdbcCredentialRepository`의 RowMapper(이제 인스턴스 필드로 전환, `CredentialCipher` 주입)가 조회 시 `cipher.decrypt(...)`, `save`/`update`가 쓰기 직전 `cipher.encrypt(...)`를 수행하도록 연결. SQL 컬럼명(`encrypted_password`/`encrypted_value`, DB에는 실제로 암호문이 들어가므로 정확한 이름)은 그대로 유지.
+- 테스트: `CredentialCipherTest`(암복호화 왕복, 같은 평문도 매번 다른 암호문 생성(랜덤 IV) 확인, 키 누락/비-base64/길이오류 3가지 fail-fast 케이스) + 기존 `JdbcTargetDbConfigRepositoryTest`/`JdbcCredentialRepositoryTest`를 평문 왕복 검증으로 갱신하고, `JdbcTemplate`으로 **DB 원본 컬럼을 직접 조회**해 평문과 다르다는 것(실제로 암호화돼 저장됨)을 확인하는 테스트 추가.
+- 코드 리뷰로 평문 로그 미노출 확인: `CredentialCipher`/두 Repository 어디에도 logger 호출 없음(평문이 로그로 샐 경로 자체가 없음).
+- **버그 수정(테스트 픽스처)**: `AbstractRepositoryIntegrationTest`의 테스트용 `MASTER_ENCRYPTION_KEY`가 base64로는 유효하지만 디코딩 결과가 34바이트였음(32바이트 AES-256 요건과 안 맞음) → CredentialCipher의 길이 검증에 걸려 모든 Spring 컨텍스트 테스트가 컨텍스트 로드 실패로 깨짐 → 정확히 32바이트(zero bytes)로 교체해 해결.
+- DoD 점검: `mvn test` 전체 28개 테스트 그린(`BUILD SUCCESS`). "저장 시 암호화된 값이 DB에 들어가고 조회 시 평문 복원"을 테스트로 확인. `mvn clean package` 재확인 성공.
+- 다음 작업: T6 (실행 엔진 코어 — `ExecutionResult`/`Sink`/SP 호출/액션 핸들러).
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.

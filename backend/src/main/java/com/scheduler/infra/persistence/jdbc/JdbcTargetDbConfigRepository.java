@@ -2,6 +2,7 @@ package com.scheduler.infra.persistence.jdbc;
 
 import com.scheduler.domain.config.TargetDbConfig;
 import com.scheduler.domain.config.TargetDbConfigRepository;
+import com.scheduler.infra.crypto.CredentialCipher;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
@@ -17,25 +18,27 @@ import java.util.Optional;
 @Repository
 public class JdbcTargetDbConfigRepository implements TargetDbConfigRepository {
 
-    private static final RowMapper<TargetDbConfig> ROW_MAPPER = (rs, rowNum) -> new TargetDbConfig(
-            rs.getLong("id"),
-            rs.getString("name"),
-            rs.getString("jdbc_url"),
-            rs.getString("username"),
-            rs.getString("encrypted_password"),
-            toInstant(rs.getTimestamp("created_at")),
-            toInstant(rs.getTimestamp("updated_at"))
-    );
-
     private final NamedParameterJdbcTemplate jdbc;
+    private final CredentialCipher cipher;
+    private final RowMapper<TargetDbConfig> rowMapper;
 
-    public JdbcTargetDbConfigRepository(NamedParameterJdbcTemplate jdbc) {
+    public JdbcTargetDbConfigRepository(NamedParameterJdbcTemplate jdbc, CredentialCipher cipher) {
         this.jdbc = jdbc;
+        this.cipher = cipher;
+        this.rowMapper = (rs, rowNum) -> new TargetDbConfig(
+                rs.getLong("id"),
+                rs.getString("name"),
+                rs.getString("jdbc_url"),
+                rs.getString("username"),
+                cipher.decrypt(rs.getString("encrypted_password")),
+                toInstant(rs.getTimestamp("created_at")),
+                toInstant(rs.getTimestamp("updated_at"))
+        );
     }
 
     @Override
     public List<TargetDbConfig> findAll() {
-        return jdbc.query("SELECT * FROM target_db_config ORDER BY id", ROW_MAPPER);
+        return jdbc.query("SELECT * FROM target_db_config ORDER BY id", rowMapper);
     }
 
     @Override
@@ -43,7 +46,7 @@ public class JdbcTargetDbConfigRepository implements TargetDbConfigRepository {
         List<TargetDbConfig> results = jdbc.query(
                 "SELECT * FROM target_db_config WHERE id = :id",
                 new MapSqlParameterSource("id", id),
-                ROW_MAPPER
+                rowMapper
         );
         return results.stream().findFirst();
     }
@@ -55,7 +58,7 @@ public class JdbcTargetDbConfigRepository implements TargetDbConfigRepository {
                 .addValue("name", config.name())
                 .addValue("jdbcUrl", config.jdbcUrl())
                 .addValue("username", config.username())
-                .addValue("encryptedPassword", config.encryptedPassword());
+                .addValue("encryptedPassword", cipher.encrypt(config.password()));
 
         jdbc.update(
                 "INSERT INTO target_db_config (name, jdbc_url, username, encrypted_password) " +
@@ -76,7 +79,7 @@ public class JdbcTargetDbConfigRepository implements TargetDbConfigRepository {
                 .addValue("name", config.name())
                 .addValue("jdbcUrl", config.jdbcUrl())
                 .addValue("username", config.username())
-                .addValue("encryptedPassword", config.encryptedPassword());
+                .addValue("encryptedPassword", cipher.encrypt(config.password()));
 
         jdbc.update(
                 "UPDATE target_db_config SET name = :name, jdbc_url = :jdbcUrl, username = :username, " +

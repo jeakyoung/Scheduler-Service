@@ -29,5 +29,6 @@ public abstract class AbstractQuartzIntegrationTest {
         registry.add("DB_USERNAME", MSSQL::getUsername);
         registry.add("DB_PASSWORD", MSSQL::getPassword);
         registry.add("MASTER_ENCRYPTION_KEY", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        registry.add("JWT_SIGNING_KEY", () -> "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=");
     }
 }

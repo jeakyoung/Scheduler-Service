@@ -10,8 +10,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
+import com.scheduler.security.JwtTokenService;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -27,6 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * JDBC EXEC round-trip (StoredProcedureInvoker -> real SQL Server), not a mocked one.
  */
 @AutoConfigureMockMvc
+@WithMockUser(username = "test-admin", roles = "ADMIN")
 class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
 
     @Autowired
@@ -40,6 +44,9 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private JwtTokenService jwtTokenService;
 
     private long targetDbConfigId;
 
@@ -135,12 +142,20 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
     void concurrentRunNowIsRejectedWithConflict() throws Exception {
         long id = createDisplayOnlySchedule("SP_TEST_SLOW");
 
+        // @WithMockUser's security context is thread-local and does NOT propagate to a
+        // manually-spawned background Thread, so the first call must carry a real
+        // Authorization header instead - otherwise it 401s immediately instead of actually
+        // blocking on the slow SP, and the "concurrent" second call never collides with it.
+        String token = jwtTokenService.generate("concurrency-test-user", "ADMIN");
+        MockHttpServletRequestBuilder runNow = post("/api/schedules/" + id + "/run-now")
+                .header("Authorization", "Bearer " + token);
+
         CountDownLatch firstStarted = new CountDownLatch(1);
         AtomicReference<Exception> backgroundError = new AtomicReference<>();
         Thread firstRun = new Thread(() -> {
             try {
                 firstStarted.countDown();
-                mockMvc.perform(post("/api/schedules/" + id + "/run-now")).andExpect(status().isOk());
+                mockMvc.perform(runNow).andExpect(status().isOk());
             } catch (Exception e) {
                 backgroundError.set(e);
             }
@@ -149,8 +164,7 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
         firstStarted.await();
         Thread.sleep(500); // give the WAITFOR DELAY call time to actually start
 
-        mockMvc.perform(post("/api/schedules/" + id + "/run-now"))
-                .andExpect(status().isConflict());
+        mockMvc.perform(runNow).andExpect(status().isConflict());
 
         firstRun.join(TimeUnit.SECONDS.toMillis(10));
         assertThat(firstRun.isAlive()).isFalse();

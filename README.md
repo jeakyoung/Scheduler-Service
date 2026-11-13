@@ -15,6 +15,8 @@
 | `DB_USERNAME` | 메타DB 접속 계정 |
 | `DB_PASSWORD` | 메타DB 접속 비밀번호 |
 | `MASTER_ENCRYPTION_KEY` | `target_db_config`/`credential` 암호화용 AES-256 마스터키 (base64). 예: `openssl rand -base64 32` |
+| `JWT_SIGNING_KEY` | 로그인 토큰(JWT, HS256) 서명키, AES-256 마스터키와 별도 값 사용. `openssl rand -base64 32` |
+| `JWT_EXPIRATION_MINUTES` | (선택) 토큰 만료(분). 기본 720(12시간) |
 | `INITIAL_ADMIN_USERNAME` | (최초 기동 시 관리자 계정이 없을 때만 사용) 시드할 관리자 계정명 |
 | `INITIAL_ADMIN_PASSWORD` | (최초 기동 시) 시드할 관리자 비밀번호 |
 | `CORS_ALLOWED_ORIGIN` | 프론트엔드(React SPA) 배포 오리진, 쉼표로 복수 허용. 로컬 기본값 `http://localhost:5173` |
@@ -52,8 +54,14 @@ npm run dev     # 로컬 개발 서버 (기본 http://localhost:5173)
 npm run build   # 프로덕션 빌드
 ```
 
-### CORS 연동 확인 (T2 완료 검증)
+### 인증 (T11) — 토큰(JWT) 기반, 세션 쿠키 아님
 
-백엔드 `backend/src/main/java/com/scheduler/security/CorsConfig.java` + `SecurityConfig.java`가 `app.cors.allowed-origin`(`CORS_ALLOWED_ORIGIN` 환경변수)에 등록된 오리진만 허용한다. 로컬 SQL Server 컨테이너로 백엔드를 띄우고 `curl`로 프론트 오리진(`http://localhost:5173`)을 흉내 낸 preflight(OPTIONS)/실제 GET 요청을 `/api/health`에 보내 `Access-Control-Allow-Origin` 헤더가 정확히 돌아오는 것을 확인했다(브라우저가 내부적으로 수행하는 것과 동일한 점검). `SecurityConfig`는 아직 T11 이전이라 임시로 모든 요청을 허용(`permitAll`) — 실제 인증 적용은 T11.
+React SPA가 백엔드와 다른 오리진이라, 세션 쿠키 방식 대신 **stateless JWT**로 결정(2026-11-13, 사용자 직접 지시) — `SameSite=None+Secure+CORS Allow-Credentials+CSRF` 방어를 전부 구성해야 하는 세션 쿠키 방식은 단일 관리자 역할의 내부 어드민 도구에는 불필요한 복잡도. `POST /api/auth/login` 성공 시 JWT 발급 → 프론트는 `Authorization: Bearer <token>` 헤더로 호출(`frontend/src/api/authToken.ts`, 메모리 보관 — `localStorage`에 영구저장하지 않음, 새로고침 시 재로그인 필요한 트레이드오프를 의도적으로 받아들임). 백엔드 `SecurityConfig`는 `SessionCreationPolicy.STATELESS` + CSRF 비활성 — 세션/쿠키 자체를 쓰지 않으므로 CORS에 `allowCredentials`도 불필요.
+
+최초 기동 시 `admin_user`가 하나도 없으면 `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`로 1회 시드된다(`AdminUserBootstrapRunner`).
+
+### CORS 연동 확인 (T2, T11에서 인증과 함께 재검증)
+
+백엔드 `backend/src/main/java/com/scheduler/security/CorsConfig.java` + `SecurityConfig.java`가 `app.cors.allowed-origin`(`CORS_ALLOWED_ORIGIN` 환경변수)에 등록된 오리진만 허용한다. 로컬 SQL Server 컨테이너로 백엔드를 띄우고 `curl`로 프론트 오리진(`http://localhost:5173`)을 흉내 낸 preflight(OPTIONS) → 로그인(POST `/api/auth/login`) → 받은 토큰으로 인증된 GET(`/api/schedules`) 전체 플로우를 실행해 매 단계 `Access-Control-Allow-Origin` 헤더가 정확히 돌아오고, 토큰 없는 요청은 401이 되는 것을 확인했다(브라우저가 내부적으로 수행하는 것과 동일한 점검).
 
 자세한 "다른 업체 재배포" 체크리스트는 T13에서 보강한다(현재는 뼈대 단계).

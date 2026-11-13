@@ -29,6 +29,12 @@
     <properties>
         <java.version>17</java.version>
         <quartz.version>2.3.2</quartz.version>
+        <!--
+          jjwt 0.13.0 — independently confirmed 2026-11-13 via Maven Central metadata
+          (repo1.maven.org/.../io/jsonwebtoken/jjwt-api/maven-metadata.xml): latest released
+          version. Not copied from any other project's pom.xml.
+        -->
+        <jjwt.version>0.13.0</jjwt.version>
     </properties>
 
     <dependencies>
@@ -72,6 +78,24 @@
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <optional>true</optional>
+        </dependency>
+
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-api</artifactId>
+            <version>${jjwt.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-impl</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt-jackson</artifactId>
+            <version>${jjwt.version}</version>
+            <scope>runtime</scope>
         </dependency>
 
         <!-- Test -->

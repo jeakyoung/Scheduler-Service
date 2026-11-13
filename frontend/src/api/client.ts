@@ -1,3 +1,5 @@
+import { getAuthToken } from "./authToken";
+
 // Backend REST API base URL — injected via Vite env var, never hardcoded.
 // Local dev: set VITE_API_BASE_URL in frontend/.env.local (gitignored).
 // See .env.example for the placeholder.
@@ -13,10 +15,12 @@ export class ApiError extends Error {
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const token = getAuthToken();
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
     headers: {
       "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...init?.headers,
     },
     ...init,

@@ -39,6 +39,9 @@ public abstract class AbstractRepositoryIntegrationTest {
         // 32 zero bytes, base64-encoded - a valid AES-256 key shape for tests only (CredentialCipher
         // requires exactly 32 decoded bytes; this is not used for anything beyond throwaway test data).
         registry.add("MASTER_ENCRYPTION_KEY", () -> "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        // Different 32 zero-ish bytes from MASTER_ENCRYPTION_KEY on purpose - signing and
+        // encryption keys shouldn't be the same value even in tests.
+        registry.add("JWT_SIGNING_KEY", () -> "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE=");
         registry.add("spring.quartz.auto-startup", () -> "false");
     }
 }

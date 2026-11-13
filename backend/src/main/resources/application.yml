@@ -42,6 +42,12 @@ scheduler-service:
   initial-admin:
     username: ${INITIAL_ADMIN_USERNAME:}
     password: ${INITIAL_ADMIN_PASSWORD:}
+  jwt:
+    # HMAC-SHA256 signing key for login tokens, base64-encoded 256-bit (32 byte) - separate
+    # from master-encryption-key on purpose (signing and encryption keys shouldn't be shared).
+    # Generate e.g. with: openssl rand -base64 32
+    signing-key: ${JWT_SIGNING_KEY}
+    expiration-minutes: ${JWT_EXPIRATION_MINUTES:720}
 
 app:
   cors:

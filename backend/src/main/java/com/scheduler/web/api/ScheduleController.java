@@ -16,6 +16,7 @@ import com.scheduler.web.api.dto.ScheduleResponse;
 import jakarta.validation.Valid;
 import org.quartz.CronExpression;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
@@ -62,7 +63,7 @@ public class ScheduleController {
 
     @PostMapping("/api/schedules")
     @ResponseStatus(HttpStatus.CREATED)
-    public ScheduleResponse create(@Valid @RequestBody ScheduleRequest request) {
+    public ScheduleResponse create(@Valid @RequestBody ScheduleRequest request, Authentication authentication) {
         String actionConfigJson = writeActionConfig(request.actionConfig());
         validateCron(request.cronExpression());
         ActionConfigRequestValidator.validate(request.actionType(), actionConfigJson);
@@ -70,14 +71,14 @@ public class ScheduleController {
         ScheduleDefinition saved = scheduleRepository.save(new ScheduleDefinition(
                 null, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
                 request.spName(), request.targetDbConfigId(), request.actionType(), actionConfigJson,
-                request.description(), null, null, null
+                request.description(), null, null, authentication.getName()
         ));
         scheduleRegistrar.register(saved);
         return toResponse(saved, List.of());
     }
 
     @PutMapping("/api/schedules/{id}")
-    public ScheduleResponse update(@PathVariable long id, @Valid @RequestBody ScheduleRequest request) {
+    public ScheduleResponse update(@PathVariable long id, @Valid @RequestBody ScheduleRequest request, Authentication authentication) {
         requireSchedule(id);
         String actionConfigJson = writeActionConfig(request.actionConfig());
         validateCron(request.cronExpression());
@@ -86,7 +87,7 @@ public class ScheduleController {
         ScheduleDefinition updated = scheduleRepository.update(new ScheduleDefinition(
                 id, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
                 request.spName(), request.targetDbConfigId(), request.actionType(), actionConfigJson,
-                request.description(), null, null, null
+                request.description(), null, null, authentication.getName()
         ));
         scheduleRegistrar.register(updated);
         return toResponse(updated, scheduleParameterRepository.findByScheduleId(id));
@@ -101,9 +102,9 @@ public class ScheduleController {
     }
 
     @PatchMapping("/api/schedules/{id}/enabled")
-    public ScheduleResponse setEnabled(@PathVariable long id, @Valid @RequestBody EnabledRequest request) {
+    public ScheduleResponse setEnabled(@PathVariable long id, @Valid @RequestBody EnabledRequest request, Authentication authentication) {
         requireSchedule(id);
-        scheduleRepository.updateEnabled(id, request.enabled(), null);
+        scheduleRepository.updateEnabled(id, request.enabled(), authentication.getName());
         ScheduleDefinition updated = requireSchedule(id);
         scheduleRegistrar.register(updated);
         return toResponse(updated, scheduleParameterRepository.findByScheduleId(id));

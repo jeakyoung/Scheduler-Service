@@ -8,6 +8,7 @@ import com.scheduler.web.api.dto.CredentialRequest;
 import com.scheduler.web.api.dto.CredentialResponse;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -40,18 +41,18 @@ public class CredentialController {
 
     @PostMapping("/api/config/credentials")
     @ResponseStatus(HttpStatus.CREATED)
-    public CredentialResponse create(@Valid @RequestBody CredentialRequest request) {
+    public CredentialResponse create(@Valid @RequestBody CredentialRequest request, Authentication authentication) {
         Credential saved = credentialRepository.save(new Credential(
-                null, request.name(), request.value(), request.description(), null, null
+                null, request.name(), request.value(), request.description(), null, authentication.getName()
         ));
         return toResponse(saved);
     }
 
     @PutMapping("/api/config/credentials/{id}")
-    public CredentialResponse update(@PathVariable long id, @Valid @RequestBody CredentialRequest request) {
-        Credential existing = requireExists(id);
+    public CredentialResponse update(@PathVariable long id, @Valid @RequestBody CredentialRequest request, Authentication authentication) {
+        requireExists(id);
         Credential updated = credentialRepository.update(new Credential(
-                id, request.name(), request.value(), request.description(), null, existing.updatedBy()
+                id, request.name(), request.value(), request.description(), null, authentication.getName()
         ));
         return toResponse(updated);
     }

@@ -167,6 +167,25 @@
 - DoD 점검: `mvn test` 전체 70개 테스트 그린 — CRUD, 마스킹(응답 바디에 평문 비밀값 없음을 `doesNotContain`으로 직접 확인), `target_db_config`는 참조 중 삭제 차단, `credential`은 참조 중 기본 차단 + `force=true`로 강제 삭제 둘 다 확인. `mvn clean package` 재확인 성공.
 - 다음 작업: T11 (인증 — Spring Security, JWT 기반으로 확정됨) + CORS 최종 설정.
 
+## 2026-11-13 — T11 인증(JWT, stateless) + CORS 최종 설정 (worker)
+- pom.xml에 jjwt 추가: Maven Central 메타데이터로 독립 확인한 최신 버전 0.13.0(ReeL-Trip이 쓴 0.12.6을 그대로 베끼지 않음, Spring Boot 버전 때와 같은 원칙 재적용) — jjwt-api/impl/jackson.
+- `security/JwtTokenService`: HS256, `JWT_SIGNING_KEY`(base64, 정확히 32바이트) 서명키를 `MASTER_ENCRYPTION_KEY`와 **별도 값**으로 분리(서명키/암호화키 혼용 금지 원칙). 누락/비-base64/길이오류 시 `CredentialCipher`와 동일한 스타일로 fail-fast. `generate(username, role)`/`parseUsername`/`parseRole`.
+- `security/JwtAuthenticationFilter`(`OncePerRequestFilter`): `Authorization: Bearer` 헤더 파싱 → 유효하면 `SecurityContextHolder`에 `UsernamePasswordAuthenticationToken(username, null, ROLE_<role>)` 설정, 무효/만료면 그냥 미인증 상태로 둠(이후 인가 규칙이 401 처리).
+- `security/SecurityConfig` 전면 교체: `SessionCreationPolicy.STATELESS` + CSRF 비활성(세션/쿠키 자체가 없으므로), `/api/auth/login`·`/api/health`만 `permitAll`, 나머지 `anyRequest().authenticated()`. **버그 발견/수정**: `exceptionHandling(...authenticationEntryPoint(...))`를 명시하지 않으면 Spring Security가 (formLogin/httpBasic 둘 다 비활성 상태라) 기본값으로 `Http403ForbiddenEntryPoint`를 써서 미인증 요청이 **401이 아니라 403**으로 나가는 것을 테스트로 발견 → `HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)`를 명시해 교정(PLAN/TASKS DoD가 명확히 401을 요구).
+- `security/CorsConfig`: `setAllowCredentials(true)` 제거 — 쿠키 기반 인증이 아니므로 더 이상 필요 없음(주석으로 이유 남김).
+- `security/AdminUserBootstrapRunner`(`ApplicationRunner`): `admin_user`가 0건이고 `INITIAL_ADMIN_USERNAME`/`PASSWORD`가 둘 다 설정돼 있으면 1회 시드(BCrypt). 레거시엔 인증 자체가 없었으므로 완전 신규.
+- `web/api/AuthController`: `POST /api/auth/login`(검증 실패 시 `BadCredentialsException`→401), `POST /api/auth/logout`(stateless라 서버측에 무효화할 게 없음 — 클라이언트가 토큰을 버리는 것으로 끝, 응답만 200), `GET /api/auth/me`.
+- T8/T10에서 "인증 없어서 `updatedBy`를 null로 둠"이라고 미뤄둔 부분을 이제 `Authentication.getName()`으로 채우도록 `ScheduleController`(create/update/setEnabled) + `CredentialController`(create/update)에 되돌아가 연결.
+- **테스트 인프라 버그 2건 발견/수정**:
+  1. 기존 MockMvc 테스트(ScheduleController/ScheduleExecutionController/TargetDbConfigController/CredentialController) 전부가 `/api/**` 보호로 인해 전부 401로 깨질 뻔함 → `@WithMockUser(username="test-admin", roles="ADMIN")`을 클래스 레벨에 추가해 기존 요청 코드를 건드리지 않고 해결.
+  2. `ScheduleExecutionControllerTest.concurrentRunNowIsRejectedWithConflict`가 수동으로 띄운 백그라운드 `Thread`에서 `mockMvc.perform(...)`을 호출하는데, `@WithMockUser`의 보안 컨텍스트는 스레드로컬이라 그 스레드엔 전파되지 않아 **첫 호출이 즉시 401로 실패**(느린 SP를 실제로 블로킹하지 못함) → 두 번째 호출이 충돌 없이 그냥 성공해버려 테스트가 깨짐. 실제 `JwtTokenService`로 토큰을 만들어 두 호출 모두에 `Authorization` 헤더로 직접 붙이는 방식으로 교정(스레드 전파 문제를 완전히 회피).
+- 신규 테스트: `AuthControllerTest`(토큰없이 401, 헬스체크는 인증불필요, 틀린 비밀번호 401, 로그인 성공 후 토큰으로 보호된 엔드포인트/`/me` 호출 성공, 쓰레기 토큰 401), `AdminUserBootstrapRunnerIntegrationTest`(다른 테스트들과 공유하는 싱글톤 컨테이너를 쓰면 다른 테스트가 이미 넣은 admin_user 때문에 "admin 0건" 전제가 깨질 수 있어서 **이 테스트만 전용 컨테이너**를 새로 띄워 격리 — `INITIAL_ADMIN_*` 시드 후 정확히 1명 존재 + 그 계정으로 실제 로그인 성공 확인).
+- **실 환경 종단 검증(DoD 명시 요구사항)**: 로컬 SQL Server 컨테이너로 백엔드를 띄우고 `curl`로 (1) `/api/auth/login` preflight(OPTIONS)가 CORS 헤더와 함께 통과, (2) 프론트 오리진에서 실제 로그인 POST가 CORS 에러 없이 토큰 발급, (3) 그 토큰으로 `/api/schedules` 호출이 CORS 헤더 포함 200, (4) 토큰 없는 호출은 401 — 4가지 모두 확인. `INITIAL_ADMIN_USERNAME=verify-admin` 시드 계정으로 실제 로그인까지 end-to-end 성공.
+- 프론트: `frontend/src/api/authToken.ts`(모듈 스코프 변수로만 토큰 보관, `localStorage` 저장 안 함 — 사용자 지시 "메모리 보관 권장" 반영, 새로고침 시 재로그인 필요한 트레이드오프를 의도적으로 수용) + `client.ts`를 `credentials:"include"`(쿠키) 대신 `Authorization: Bearer` 헤더 첨부로 교체. 로그인 페이지 자체의 UI/리다이렉트 처리는 T12 몫.
+- README에 JWT 환경변수(`JWT_SIGNING_KEY`/`JWT_EXPIRATION_MINUTES`) + 인증 방식 설명 + CORS 재검증 내용 보강.
+- DoD 점검: `mvn test` 전체 76개 테스트 그린. `mvn clean package` 재확인 성공. 인증 없이 401(403 아님) 확인. 로그인 후 정상 호출 확인. 프론트 오리진에서 로그인 플로우 CORS 에러 없이 동작 확인. 최초 기동 시 시드 계정 로그인 가능 확인.
+- 다음 작업: T12 (React SPA 실제 화면 구현).
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.

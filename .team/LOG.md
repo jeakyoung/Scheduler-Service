@@ -41,3 +41,29 @@
 - DoD 점검: `mvn clean package` 성공(jar 생성 확인, `target/scheduler-service-0.1.0-SNAPSHOT.jar`). 디렉터리 구조 PLAN.md §2와 일치 확인. README에 환경변수 안내 문구 존재.
 - 참고: docker daemon이 꺼져 있어 백그라운드로 Docker Desktop 기동 시도 중(T2의 테스트컨테이너 기반 마이그레이션 검증에 필요). T2 진행 전 상태 확인 예정.
 - 다음 작업: T2 (메타DB 스키마 Flyway 마이그레이션).
+
+## 2026-11-13 10:4x — 아키텍처 교정 (사용자 직접 지시): 백엔드/프론트 분리
+- 사용자가 T1 pom.xml을 보고 의문 제기: Spring Boot 버전(3.3.5)과 Lombok-exclude 빌드 설정이 같은 `C:\Github` 아래의 무관한 프로젝트 `ReeL-Trip`의 `apps/api-spring/pom.xml`과 완전히 동일 — orchestrator가 직접 대조 확인한 결과, worker가 독립적으로 버전을 판단하지 않고 템플릿을 그대로 베낀 것으로 보임(지적이 맞음). 큰 스택 방향(Java/Spring Boot/Quartz/SQL Server) 자체는 RESEARCH.md §(c)/PLAN.md §1에 레거시 연속성 근거로 독립적으로 설명되어 있으나, 세부 버전/보일러플레이트는 재검토 필요.
+- 이어서 사용자가 "관리자 화면을 Thymeleaf로 같은 Java 앱에 넣는 게 맞는지, 프론트엔드 언어를 뭘 쓸지 정해지지 않은 상태 아니냐"고 질문 → orchestrator가 AskUserQuestion으로 확인 → 결정:
+  1. **백엔드/프론트 분리**: 백엔드는 Java(Spring Boot)로 REST API만 제공, 화면(프론트엔드)은 별도 앱으로 분리 (Thymeleaf 서버사이드 렌더링 방식 폐기).
+  2. 스케줄링 엔진 코어에 Spring Boot 프레임워크를 쓰는 것 자체는 유지하기로 확정(Quartz 연동/설정주입 편의성 근거 유효).
+  3. 프론트엔드 기술은 **React**로 확정(사용자 직접 지시).
+- 영향 범위: PLAN.md §1(기술스택: Thymeleaf 제거, React SPA 추가, 저장소 구조를 backend/+frontend/로 분리 검토), §2(프로젝트 구조), §6(API — CORS 등 SPA 연동 고려), §7(화면 목록 — Thymeleaf 템플릿 대신 React 화면 목록으로 재작성), TASKS.md(T1 pom.xml 재작업: thymeleaf 제거 + Spring Boot 버전 독립 재검토, React 프론트 작업 T 추가). T1 pom.xml/디렉터리는 아직 커밋 1개뿐이라 재작업 비용 작음.
+- 다음 단계: sched-planner에게 이 아키텍처 교정을 반영해 PLAN.md/TASKS.md 수정 지시 → 이후 sched-worker에게 T1 재작업부터 재지시.
+
+## 2026-11-13 10:5x — PLAN.md/TASKS.md 3차 교정 완료
+- sched-planner가 반영 완료: PLAN.md §1(Thymeleaf 제거, React SPA/CORS 명시, Spring Boot 패치버전 독립검증 지침+ReeL-Trip 복붙 사례 경고 추가), §2(backend/+frontend/ 분리 트리), §6(CORS), §7(React 화면 목록)까지 전체 수정 확인.
+- TASKS.md 재분해 확인: T1(백엔드 스캐폴딩, backend/로 이동 + thymeleaf 제거 + Spring Boot 버전 독립확인·근거기록 의무화) → T2(프론트 스캐폴딩+CORS) → T3~T11(기존 백엔드 작업, 번호만 밀림) → T12(React SPA 실제 화면 구현) → T13(비밀값 점검, 백엔드/프론트 양쪽) → T14(테스트) → T15(future, 실행이력).
+- (orchestrator 메모) 중간에 herdr agent prompt 호출 시 bash 백틱 이스케이프 실수로 지시문 일부가 깨진 적 있었음 — 이후부터는 특수문자 포함 긴 지시문은 파일에 써서 `$(cat file)`로 전달하는 방식 사용.
+- 다음 단계: sched-worker에게 "기존 루트의 T1 결과(pom.xml 등)를 backend/로 옮기고 thymeleaf 제거 + Spring Boot 버전 독립 재검토"부터 다시 시작해서 갱신된 TASKS.md 순서(T1~T14)대로 이어서 진행 지시.
+
+## 2026-11-13 — T1 재작업 (worker): backend/ 분리 + thymeleaf 제거 + Spring Boot 버전 독립 확정
+- 갱신된 PLAN.md/TASKS.md(3차 교정) 전체를 처음부터 다시 읽음. 핵심 변경사항(백엔드/프론트 분리, backend+frontend 디렉터리, Spring Boot 버전 독립검증 의무화) 확인.
+- 레포 루트의 `pom.xml`/`src/`를 `git mv`로 `backend/pom.xml`/`backend/src/`로 이동(히스토리 보존, rebase/amend 없이 새 커밋으로 처리).
+- `spring-boot-starter-thymeleaf` 의존성 제거, `web/admin`·`resources/templates` 빈 디렉터리 제거(화면 렌더링 없음 — REST API 전용).
+- **Spring Boot 버전 독립 확정**: WebFetch로 Maven Central `spring-boot-starter-parent` 메타데이터를 직접 조회해 3.5.16이 3.x 세대(이후 업스트림은 4.x로 전환)의 최신 패치임을 확인 → `3.3.5`(ReeL-Trip `apps/api-spring/pom.xml`과 우연히 동일했던 버전, 독립 판단 없이 베낀 것으로 사용자가 지적한 값)에서 교체. 근거를 `backend/pom.xml` 주석 + `README.md`에 기록. Lombok-exclude 빌드 블록은 Spring Boot+Lombok 조합의 표준 보일러플레이트(Spring Initializr 생성물과 동일)라 그대로 유지 — 베낀 게 아니라 프레임워크 관례.
+- `application.yml`: thymeleaf 섹션 제거, `app.cors.allowed-origin`(`${CORS_ALLOWED_ORIGIN:http://localhost:5173}`) 플레이스홀더 추가(CORS 실제 구현/검증은 T2).
+- `CorsConfig` 빈 placeholder 클래스는 만들지 않음 — T2가 바로 다음이라 실제 구현을 그때 하는 게 맞다고 판단(TASKS.md T1은 application.yml 자리 마련까지만 요구).
+- README에 backend/frontend 분리 구조, CORS 환경변수, Spring Boot 버전 선정 근거 보강.
+- DoD 점검: `cd backend && mvn clean package` 성공(jar 생성 확인). 디렉터리 구조가 갱신된 PLAN.md §2 `backend/` 트리와 일치(`web/admin`/templates 없음). `grep -ri thymeleaf backend/pom.xml backend/src` 결과 0건. 버전 선정 근거 README/커밋에 기록됨.
+- 다음 작업: T2 (프론트엔드 Vite+React 스캐폴딩 + CORS 실제 구현/검증).

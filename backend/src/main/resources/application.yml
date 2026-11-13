@@ -27,9 +27,6 @@ spring:
           scheduler:
             instanceName: SchedulerServiceQuartz
 
-  thymeleaf:
-    cache: false
-
 server:
   port: ${SERVER_PORT:8080}
 
@@ -41,6 +38,12 @@ scheduler-service:
   initial-admin:
     username: ${INITIAL_ADMIN_USERNAME:}
     password: ${INITIAL_ADMIN_PASSWORD:}
+
+app:
+  cors:
+    # Comma-separated list of allowed frontend origins (React SPA dev server / deployed domain).
+    # e.g. http://localhost:5173,https://scheduler.example.com
+    allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
 
 logging:
   level:

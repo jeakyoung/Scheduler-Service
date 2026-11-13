@@ -11,6 +11,10 @@
 > 4. **즉시실행(수동 트리거)** 포함 — 관리자 웹에서 "지금 실행" 시 정규 스케줄과 무관하게 1회 실행되고, 그 결과를 동기 응답으로 즉시 받아 화면에 표시한다 (영속 저장 여부와 무관).
 > 5. **SP 파라미터화** — 파라미터 없는 EXEC와 파라미터 있는 EXEC를 모두 지원하는 구조.
 > 6. 실행 이력은 "백업 서버"가 아니라 "**감시(모니터링) 서버**" 개념 — SP 전체 결과 행을 보존하는 게 목적이 아니라 상태/요약만 남기는 것이 목적. (TBD 스키마를 나중에 설계할 때도 이 원칙을 따를 것. 지금 스키마를 만들지는 않음.)
+>
+> **2026-11-13 3차 교정(사용자 직접 지시) 반영 사항**:
+> 7. **백엔드/프론트 분리** — 관리자 웹 화면을 백엔드(Spring Boot)에 Thymeleaf로 통합하던 설계를 폐기하고, 백엔드는 REST API만 제공, 화면은 별도 React SPA(`frontend/`)로 분리한다(§1, §2, §6, §7).
+> 8. **Spring Boot 패치 버전 독립 검증** — 특정 버전 숫자를 지금 고정하지 않고, 구현 착수 시점에 worker가 독립적으로 최신 안정 3.x 패치 버전을 확인하고 근거를 남기도록 지침만 명시(§1). 다른 무관한 프로젝트의 빌드 설정을 그대로 베끼지 않을 것.
 
 ---
 
@@ -36,92 +40,107 @@ RESEARCH.md (c)의 추천을 그대로 채택한다. 조정 없음.
 | 항목 | 결정 | 근거 |
 |---|---|---|
 | 언어/런타임 | Java 17 (LTS) | Quartz/Spring Boot 3.x 호환, 팀의 기존 JVM/JDBC/SQL Server 경험 재사용 |
-| 프레임워크 | Spring Boot 3.x | Quartz 통합(`spring-boot-starter-quartz`), `@ConfigurationProperties`/Profile로 (2)의 외부 설정 주입을 프레임워크 차원에서 지원, Spring Security로 관리자 인증 |
+| 프레임워크 | Spring Boot 3.x (백엔드는 **REST API 전용** — 화면 렌더링 없음) | Quartz 통합(`spring-boot-starter-quartz`), `@ConfigurationProperties`/Profile로 (2)의 외부 설정 주입을 프레임워크 차원에서 지원, Spring Security로 API 인증. **구체적 패치 버전은 이 문서에서 고정하지 않음 — 아래 "Spring Boot 버전 지침" 참고** |
 | 스케줄링 | Quartz (JDBC JobStore) | RESEARCH (a) 결론 그대로: 임의 cron 지원·재시작 복구·(향후 다중 인스턴스 대비) 트리거 락킹을 기본 제공. **단일 프로세스 전제**(§0)이므로 다중 인스턴스 락킹은 "현재 필요"가 아니라 "future-proofing에 거의 비용 없이 따라오는 보너스"로 간주 — 이것 때문에 Quartz를 선택한 것은 아니고, 임의 cron + 재시작 복구만으로도 선택 이유가 충분하다 |
 | 메타DB (스케줄 정의/설정/Quartz 상태 저장) | SQL Server | Quartz JDBC JobStore 공식 지원, 팀의 기존 SQL Server 운영 경험 |
 | 대상 업무 DB(SP를 호출할 대상) | SQL Server 기본, 드라이버 교체로 타 DBMS 허용 | 레거시와 동일(SQL Server) 전제가 기본이지만, 업체마다 다를 수 있으므로 `target_db_config`에 `db_type`을 필드로 둬 코드 변경 없이 선택 가능하게 함(단, 해당 DBMS JDBC 드라이버가 클래스패스에 있어야 함 — 이는 패키징/배포 문제이고 PLAN 범위에서는 SQL Server 드라이버만 기본 포함) |
 | 빌드도구 | Maven | RESEARCH 근거 동일(온보딩 마찰 최소) |
 | 배포 형태 | Spring Boot 실행 가능 jar(내장 톰캣) | 컨테이너화·운영 단순성. WAR 패키징도 기술적으로 가능하지만 기본값은 jar |
-| 관리자 웹 UI | Spring MVC + Thymeleaf (서버사이드 렌더링) | 별도 프론트엔드 빌드/배포 파이프라인이 필요 없음. 이 프로젝트 규모(화면 ~8개)에서 SPA는 과설계 — 서버 렌더링으로 충분 |
-| 인증 | Spring Security, DB 기반 관리자 계정 + 세션 로그인 | 레거시에는 이런 보호가 전혀 없었음(개선점). 단일 업체 전제이므로 복잡한 역할(role)/권한 체계는 불필요 — ADMIN 단일 역할로 시작 |
+| 관리자 웹 UI | **React (SPA), 백엔드와 완전히 분리된 별도 프론트엔드 앱** | 백엔드는 REST API만 제공, 화면은 별도 React 앱이 그 API를 호출하는 구조로 분리(2026-11-13 3차 교정, 사용자 직접 지시). Spring Boot를 Thymeleaf 서버 렌더링에 쓰지 않는다 — 프론트/백엔드가 독립적으로 빌드·배포되므로 CORS 허용 오리진 설정이 백엔드에 필요(§6 참고) |
+| 인증 | Spring Security, DB 기반 관리자 계정 + 토큰/세션 기반 API 인증 | 레거시에는 이런 보호가 전혀 없었음(개선점). 단일 업체 전제이므로 복잡한 역할(role)/권한 체계는 불필요 — ADMIN 단일 역할로 시작. SPA가 별도 오리진에서 호출하므로 CORS와 함께 쿠키(SameSite)/토큰 방식 중 구현 단계에서 선택 |
 | DB 접근 | Spring JDBC (`JdbcTemplate` 또는 `NamedParameterJdbcTemplate`) | 레거시의 `Statement`/`ResultSet` 수동 매핑 스타일을 거의 1:1 포팅. ORM 불필요(SP 호출 패턴 유지) |
 | 마이그레이션 | Flyway | 메타DB 스키마(스케줄 정의/설정/관리자 계정) 버전 관리. Quartz `QRTZ_*` 테이블도 Flyway 마이그레이션으로 함께 적용 |
+
+> **Spring Boot 버전 지침 (2026-11-13 3차 교정, 4차 재확인)**: 이 문서는 Spring Boot 3.x 계열을 채택한다는 결정만 내리고, **구체적인 패치 버전(예: 3.x.y) 숫자는 지금 박지 않는다.** 구현 시점(worker)이 현재 기준으로 안정적인 최신 Spring Boot 3.x 패치 버전을 **독립적으로 확인**하고, 그 버전을 고정하는 근거(해당 버전이 왜 적절한지 — 예: 사용 중인 Java 버전과의 호환성, 알려진 치명적 버그 없음 등)를 **커밋 메시지나 `LOG.md`에 1~2줄로** 남길 것.
+>
+> **다른 무관한 프로젝트의 `pom.xml`을 템플릿으로 그대로 복사해서 버전/보일러플레이트를 결정하지 말 것.** 실제로 T1에서 생성된 `backend/pom.xml`의 `spring-boot-starter-parent` 버전(3.3.5)과 Lombok-exclude 빌드 설정 블록이, 같은 `C:\Github` 아래의 무관한 프로젝트 **ReeL-Trip**의 `apps/api-spring/pom.xml` 설정과 완전히 동일한 것이 발견된 사례가 있었다(사용자 직접 지적, worker가 버전을 독립적으로 판단하지 않고 그대로 베낀 것으로 확인됨) — 같은 실수를 반복하지 말 것.
 
 ---
 
 ## 2. 프로젝트 구조 (디렉터리/패키지)
 
+**2026-11-13 3차 교정(사용자 직접 지시) 반영**: 백엔드(Spring Boot, REST API 전용)와 프론트엔드(React SPA)를 레포 루트에서 `backend/`/`frontend/` 두 디렉터리로 분리한다. 기존에 레포 루트가 곧 Maven 프로젝트였던 구조는 `backend/`로 옮기고, `frontend/`를 신설한다. 백엔드는 화면을 전혀 렌더링하지 않고(Thymeleaf 제거) API만 제공한다.
+
 ```
-scheduler-service/                         (Maven 루트, pom.xml)
-├─ src/main/java/com/scheduler/
-│  ├─ SchedulerServiceApplication.java      (Spring Boot 엔트리포인트)
-│  │
-│  ├─ engine/                               ─ 실행 엔진 (레거시 실행흐름 포팅 지점)
-│  │  ├─ quartz/
-│  │  │  ├─ GenericScheduleJob.java         (Quartz Job, JobDataMap에는 scheduleId만 — 매 실행마다 최신 정의를 메타DB에서 재조회)
-│  │  │  ├─ QuartzConfig.java               (JDBC JobStore 설정)
-│  │  │  └─ ScheduleRegistrar.java          (scheduleJob/rescheduleJob/deleteJob 래핑 — 관리자 CRUD가 호출)
+Scheduler-Service/                         (레포 루트, git 루트)
+├─ backend/                                (Maven 루트, pom.xml — 기존 scheduler-service 그대로 이 아래로)
+│  ├─ src/main/java/com/scheduler/
+│  │  ├─ SchedulerServiceApplication.java  (Spring Boot 엔트리포인트)
 │  │  │
-│  │  ├─ execution/                         ─ 저장소 비의존 핵심 (교정사항 #1, #3, #6)
-│  │  │  ├─ ScheduleExecutor.java           (Job과 수동실행 API가 공유하는 실행 진입점 — 레거시 run() 본문에 해당)
-│  │  │  ├─ TriggerType.java                (SCHEDULED | MANUAL)
-│  │  │  ├─ ExecutionResult.java            (값 객체: scheduleId, triggerType, startedAt, finishedAt, status, summary, errorMessage)
-│  │  │  ├─ ExecutionStatus.java            (SUCCESS | FAILURE)
-│  │  │  ├─ ExecutionResultSink.java        (포트 인터페이스: record(ExecutionResult))
-│  │  │  ├─ LoggingExecutionResultSink.java (현재 유일한 구현 — SLF4J 로그 출력. 추후 DB Sink로 교체/추가)
-│  │  │  ├─ DisplayOutput.java              (값 객체: 모드 b 결과물 — 컬럼/행, 생성시각)
-│  │  │  └─ DisplayOutputStore.java         (스케줄ID별 "마지막 표시결과"만 보관하는 인메모리 저장소 — 이력이 아니라 최신값 캐시)
+│  │  ├─ engine/                           ─ 실행 엔진 (레거시 실행흐름 포팅 지점)
+│  │  │  ├─ quartz/
+│  │  │  │  ├─ GenericScheduleJob.java     (Quartz Job, JobDataMap에는 scheduleId만 — 매 실행마다 최신 정의를 메타DB에서 재조회)
+│  │  │  │  ├─ QuartzConfig.java           (JDBC JobStore 설정)
+│  │  │  │  └─ ScheduleRegistrar.java      (scheduleJob/rescheduleJob/deleteJob 래핑 — 관리자 API가 호출)
+│  │  │  │
+│  │  │  ├─ execution/                     ─ 저장소 비의존 핵심 (교정사항 #1, #3, #6)
+│  │  │  │  ├─ ScheduleExecutor.java       (Job과 수동실행 API가 공유하는 실행 진입점 — 레거시 run() 본문에 해당)
+│  │  │  │  ├─ TriggerType.java            (SCHEDULED | MANUAL)
+│  │  │  │  ├─ ExecutionResult.java        (값 객체: scheduleId, triggerType, startedAt, finishedAt, status, summary, errorMessage)
+│  │  │  │  ├─ ExecutionStatus.java        (SUCCESS | FAILURE)
+│  │  │  │  ├─ ExecutionResultSink.java    (포트 인터페이스: record(ExecutionResult))
+│  │  │  │  ├─ LoggingExecutionResultSink.java (현재 유일한 구현 — SLF4J 로그 출력. 추후 DB Sink로 교체/추가)
+│  │  │  │  ├─ DisplayOutput.java          (값 객체: 모드 b 결과물 — 컬럼/행, 생성시각)
+│  │  │  │  └─ DisplayOutputStore.java     (스케줄ID별 "마지막 표시결과"만 보관하는 인메모리 저장소 — 이력이 아니라 최신값 캐시)
+│  │  │  │
+│  │  │  ├─ action/                        ─ 다운스트림 동작 2종 (교정사항 #2)
+│  │  │  │  ├─ ActionHandler.java          (인터페이스: handle(spResultRows, ScheduleDefinition) → ActionOutcome)
+│  │  │  │  ├─ ApiCallActionHandler.java   (임의 URL/메서드/헤더/바디템플릿 POST — 레거시 executeTask2 일반화)
+│  │  │  │  ├─ DisplayOnlyActionHandler.java (SP 결과를 DisplayOutput으로 가공, 외부 호출 없음)
+│  │  │  │  └─ BodyTemplateRenderer.java   (`${COLUMN}` / `${cred:NAME}` 플레이스홀더 치환)
+│  │  │  │
+│  │  │  └─ sp/                            ─ SP 호출 (레거시 executeTask1 일반화)
+│  │  │     ├─ StoredProcedureInvoker.java (JDBC로 `EXEC {spName} {params...}` 실행, DataTable류 행 리스트 반환)
+│  │  │     └─ SpParameterResolver.java    (schedule_parameter 행 → 실제 바인딩 값. LITERAL/CURRENT_DATE/CURRENT_DATETIME 등 value_source 해석 — 교정사항 #5)
 │  │  │
-│  │  ├─ action/                            ─ 다운스트림 동작 2종 (교정사항 #2)
-│  │  │  ├─ ActionHandler.java              (인터페이스: handle(spResultRows, ScheduleDefinition) → ActionOutcome)
-│  │  │  ├─ ApiCallActionHandler.java       (임의 URL/메서드/헤더/바디템플릿 POST — 레거시 executeTask2 일반화)
-│  │  │  ├─ DisplayOnlyActionHandler.java   (SP 결과를 DisplayOutput으로 가공, 외부 호출 없음)
-│  │  │  └─ BodyTemplateRenderer.java       (`${COLUMN}` / `${cred:NAME}` 플레이스홀더 치환)
+│  │  ├─ domain/
+│  │  │  ├─ schedule/
+│  │  │  │  ├─ ScheduleDefinition.java, ScheduleParameter.java
+│  │  │  │  ├─ ActionType.java            (API_CALL | DISPLAY_ONLY)
+│  │  │  │  ├─ GroupingMode.java           (PER_ROW | GROUP_BY)
+│  │  │  │  └─ ScheduleRepository.java (인터페이스) / ScheduleParameterRepository.java
+│  │  │  ├─ config/
+│  │  │  │  ├─ TargetDbConfig.java, Credential.java
+│  │  │  │  └─ TargetDbConfigRepository.java / CredentialRepository.java
+│  │  │  └─ admin/
+│  │  │     └─ AdminUser.java, AdminUserRepository.java
 │  │  │
-│  │  └─ sp/                                ─ SP 호출 (레거시 executeTask1 일반화)
-│  │     ├─ StoredProcedureInvoker.java     (JDBC로 `EXEC {spName} {params...}` 실행, DataTable류 행 리스트 반환)
-│  │     └─ SpParameterResolver.java        (schedule_parameter 행 → 실제 바인딩 값. LITERAL/CURRENT_DATE/CURRENT_DATETIME 등 value_source 해석 — 교정사항 #5)
+│  │  ├─ infra/
+│  │  │  ├─ persistence/jdbc/              (위 Repository 인터페이스의 JdbcTemplate 구현체)
+│  │  │  ├─ crypto/
+│  │  │  │  └─ CredentialCipher.java       (AES-GCM, 마스터키는 환경변수에서 로드 — 교정 이전 지시의 비밀값 설계)
+│  │  │  └─ http/
+│  │  │     └─ GenericHttpClient.java      (임의 URL/메서드/헤더 POST 래퍼 — 레거시 HttpURLConnection 로직 일반화)
+│  │  │
+│  │  ├─ web/
+│  │  │  └─ api/                           (REST만 — 화면 렌더링 컨트롤러 없음)
+│  │  │     ├─ ScheduleController.java, ScheduleParameterController.java
+│  │  │     ├─ ScheduleExecutionController.java (수동실행/최근결과 — 교정사항 #4)
+│  │  │     ├─ TargetDbConfigController.java, CredentialController.java
+│  │  │     └─ AuthController.java
+│  │  │
+│  │  └─ security/
+│  │     ├─ SecurityConfig.java            (Spring Security: /api/** 보호, 로그인 제외)
+│  │     └─ CorsConfig.java                (frontend 오리진을 허용 오리진으로 등록 — §6 참고)
 │  │
-│  ├─ domain/
-│  │  ├─ schedule/
-│  │  │  ├─ ScheduleDefinition.java, ScheduleParameter.java
-│  │  │  ├─ ActionType.java                (API_CALL | DISPLAY_ONLY)
-│  │  │  ├─ GroupingMode.java               (PER_ROW | GROUP_BY)
-│  │  │  └─ ScheduleRepository.java (인터페이스) / ScheduleParameterRepository.java
-│  │  ├─ config/
-│  │  │  ├─ TargetDbConfig.java, Credential.java
-│  │  │  └─ TargetDbConfigRepository.java / CredentialRepository.java
-│  │  └─ admin/
-│  │     └─ AdminUser.java, AdminUserRepository.java
+│  ├─ src/main/resources/
+│  │  ├─ application.yml                   (기본값 + `${ENV_VAR}` 플레이스홀더, `app.cors.allowed-origin` 등)
+│  │  ├─ application-local.yml              (로컬 개발용, gitignore)
+│  │  └─ db/migration/                      (Flyway: V1__schedule_core.sql, V2__quartz_tables.sql, ...)
 │  │
-│  ├─ infra/
-│  │  ├─ persistence/jdbc/                  (위 Repository 인터페이스의 JdbcTemplate 구현체)
-│  │  ├─ crypto/
-│  │  │  └─ CredentialCipher.java           (AES-GCM, 마스터키는 환경변수에서 로드 — 교정 이전 지시의 비밀값 설계)
-│  │  └─ http/
-│  │     └─ GenericHttpClient.java          (임의 URL/메서드/헤더 POST 래퍼 — 레거시 HttpURLConnection 로직 일반화)
-│  │
-│  ├─ web/
-│  │  ├─ api/                               (REST — 관리자 웹이 호출)
-│  │  │  ├─ ScheduleController.java, ScheduleParameterController.java
-│  │  │  ├─ ScheduleExecutionController.java (수동실행/최근결과 — 교정사항 #4)
-│  │  │  ├─ TargetDbConfigController.java, CredentialController.java
-│  │  │  └─ AuthController.java
-│  │  └─ admin/                             (Thymeleaf MVC 컨트롤러 + 뷰)
-│  │     └─ templates/ (login, schedule-list, schedule-form, run-result, target-db, credential)
-│  │
-│  └─ security/
-│     └─ SecurityConfig.java                (Spring Security: /admin/**, /api/** 보호, 세션 로그인)
+│  └─ pom.xml
 │
-├─ src/main/resources/
-│  ├─ application.yml                       (기본값 + `${ENV_VAR}` 플레이스홀더)
-│  ├─ application-local.yml                 (로컬 개발용, gitignore)
-│  └─ db/migration/                         (Flyway: V1__schedule_core.sql, V2__quartz_tables.sql, ...)
-│
-└─ pom.xml
+└─ frontend/                                (React SPA, 백엔드와 별도 빌드/배포)
+   ├─ src/
+   │  ├─ pages/                             (§7 화면 목록에 1:1 대응 — Login, ScheduleList, ScheduleForm, RunResult, LastResult, TargetDbConfig, Credential, ChangePassword)
+   │  ├─ components/                        (공용 UI: 파라미터 편집기, 헤더/바디템플릿 에디터 등)
+   │  ├─ api/                               (백엔드 REST 호출 클라이언트, baseURL = 환경변수로 주입)
+   │  └─ App.tsx / 라우팅
+   ├─ .env.example                          (API_BASE_URL 등 — 실제 값은 gitignore된 .env.local)
+   └─ package.json
 ```
 
-**레거시 대비 구조적 의도**: `engine/execution`과 `engine/action`, `engine/sp` 패키지는 `domain`/`infra`(= 영속성 구현)를 모른 채로 동작할 수 있어야 한다. `ScheduleExecutor`는 `ExecutionResultSink`/`DisplayOutputStore` 인터페이스만 의존하므로, 교정사항 #1의 "저장소 구현에 의존하지 않는 경계"가 패키지 경계로 그대로 드러난다.
+**레거시 대비 구조적 의도**: `engine/execution`과 `engine/action`, `engine/sp` 패키지는 `domain`/`infra`(= 영속성 구현)를 모른 채로 동작할 수 있어야 한다. `ScheduleExecutor`는 `ExecutionResultSink`/`DisplayOutputStore` 인터페이스만 의존하므로, 교정사항 #1의 "저장소 구현에 의존하지 않는 경계"가 패키지 경계로 그대로 드러난다. 이 경계는 백엔드/프론트엔드 분리와는 별개 축이다 — 프론트엔드는 어느 경우에도 `web/api`가 내놓는 REST 계약(JSON)만 바라본다.
 
 ---
 
@@ -291,7 +310,7 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 
 ## 6. API 목록
 
-모든 `/api/**`는 Spring Security 세션 인증 필요(로그인 제외).
+모든 `/api/**`는 Spring Security 인증 필요(로그인 제외). 백엔드와 프론트엔드(React SPA)가 별도 오리진에서 배포되므로 **CORS 허용 오리진 설정이 필요**하다 — 백엔드 `CorsConfig`가 프론트엔드 배포 오리진(로컬 개발 시 `http://localhost:5173` 류, 운영 시 실제 프론트 배포 도메인)을 환경변수(`app.cors.allowed-origin`)로 주입받아 허용 목록에 등록한다. 자격증명(쿠키/세션) 포함 요청을 쓸 경우 `Access-Control-Allow-Credentials`까지 함께 고려해야 함(세션 vs 토큰 인증 중 구현 단계 선택에 따라 결정).
 
 ### 인증
 | Method | Path | 설명 |
@@ -336,18 +355,20 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 
 ---
 
-## 7. 화면 목록 (관리자 웹, Thymeleaf)
+## 7. 화면 목록 (관리자 웹, React SPA — 백엔드와 별도 앱)
 
-1. **로그인**
-2. **스케줄 목록** — enabled 토글, cron, 다음 실행 예정시각, 마지막 실행 상태(성공/실패 뱃지 — 인메모리 캐시 기반, "이력 아님" 명시), "지금 실행" 버튼
-3. **스케줄 생성/수정** — 기본정보(이름/cron/timezone/대상DB/SP명) + 파라미터 편집기(행 추가/삭제, 이름/타입/값소스/리터럴값) + action_type 선택에 따라 폼이 동적으로 전환:
+화면 자체의 목록·내용은 교정 전과 동일하고, 구현 기술만 Thymeleaf 서버 렌더링 → React 컴포넌트/페이지로 바뀐다. 각 페이지는 `frontend/src/api/` 클라이언트를 통해서만 백엔드 `/api/**`를 호출한다(페이지가 직접 DB/Quartz를 알지 못함).
+
+1. **Login 페이지** — 로그인 폼 → `/api/auth/login` 호출, 인증 토큰/세션 저장
+2. **ScheduleList 페이지** — 스케줄 목록 테이블: enabled 토글, cron, 다음 실행 예정시각, 마지막 실행 상태(성공/실패 뱃지 — 인메모리 캐시 기반, "이력 아님" 명시), "지금 실행" 버튼
+3. **ScheduleForm 페이지** — 생성/수정 공용: 기본정보(이름/cron/timezone/대상DB/SP명) + 파라미터 편집기 컴포넌트(행 추가/삭제, 이름/타입/값소스/리터럴값) + `action_type` 선택에 따라 폼 영역이 동적으로 전환되는 컴포넌트:
    - `API_CALL` 선택 시: method/url/headers(키-값 추가, 값에 `${cred:NAME}` 선택 가능하도록 credential 목록 드롭다운 제공)/groupingMode/groupByField/bodyTemplate(placeholder 안내 포함)
    - `DISPLAY_ONLY` 선택 시: displayFormat/columns 선택
-4. **수동 실행 결과** — "지금 실행" 클릭 시 결과(성공/실패, summary, errorMessage, `DISPLAY_ONLY`면 표/텍스트 결과)를 같은 화면(모달 또는 페이지)에서 바로 표시
-5. **최근 실행 결과 보기** — 스케줄별 `last-result` 조회 화면(= `DisplayOutputStore`/`ExecutionResult` 캐시 열람, 영속 이력이 아니라는 안내 문구 포함)
-6. **대상 DB 설정 관리** — 목록/생성/수정/삭제, 비밀번호 마스킹
-7. **자격증명 관리** — 목록/생성/수정/삭제, 값 마스킹
-8. **비밀번호 변경** (본인 계정) — 최소 수준의 계정 관리, 복잡한 계정 관리 화면은 범위 밖(§0: 단일 역할)
+4. **RunResult 컴포넌트/모달** — "지금 실행" 클릭 시 `/api/schedules/{id}/run-now` 응답(성공/실패, summary, errorMessage, `DISPLAY_ONLY`면 표/텍스트 결과)을 같은 화면에서 모달 또는 인라인으로 바로 표시
+5. **LastResult 페이지** — 스케줄별 `last-result` 조회(= `DisplayOutputStore`/`ExecutionResult` 캐시 열람, 영속 이력이 아니라는 안내 문구 포함)
+6. **TargetDbConfig 페이지** — 대상 DB 설정 목록/생성/수정/삭제, 비밀번호 마스킹
+7. **Credential 페이지** — 자격증명 목록/생성/수정/삭제, 값 마스킹
+8. **ChangePassword 페이지** (본인 계정) — 최소 수준의 계정 관리, 복잡한 계정 관리 화면은 범위 밖(§0: 단일 역할)
 
 ---
 

@@ -4,10 +4,18 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
     <modelVersion>4.0.0</modelVersion>
 
+    <!--
+      Spring Boot 3.5.16 — independently confirmed 2026-11-13 via Maven Central metadata
+      (repo1.maven.org/.../spring-boot-starter-parent/maven-metadata.xml): it is the latest
+      published patch of the 3.5.x line, the newest minor still on the 3.x generation (the
+      project has since moved to 4.x upstream). PLAN.md §1 pins this project to the 3.x
+      generation specifically, so 4.x is intentionally not adopted here. 3.5.x's Java 17
+      baseline matches this project's <java.version> below.
+    -->
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.5</version>
+        <version>3.5.16</version>
         <relativePath/>
     </parent>
 
@@ -31,10 +39,6 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-security</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

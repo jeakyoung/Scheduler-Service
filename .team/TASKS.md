@@ -2,22 +2,35 @@
 
 > `.team/PLAN.md` 기준. 순서대로 구현한다(각 작업은 원칙적으로 앞 작업의 결과물 위에 쌓임).
 > 레거시(`C:\Users\USER\Desktop\scheduler-test\scheduler-test`)는 참고만 하고 수정하지 않는다.
-> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T14)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T5)은 이번 범위에 포함된다.
+> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T15)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
+> **2026-11-13 3차 교정(사용자 직접 지시) 반영**: 관리자 화면은 Thymeleaf가 아니라 별도 React SPA(`frontend/`)로 구현한다. 백엔드(`backend/`)는 REST API만 제공한다. 이에 따라 레포를 `backend/`/`frontend/` 두 디렉터리로 분리하는 작업(T1)과 프론트엔드 스캐폴딩+CORS 연동(T2)을 별도 작업으로 추가했다.
 
 ---
 
-### T1. 프로젝트 스캐폴딩
+### T1. 백엔드 프로젝트 스캐폴딩
 
-- Maven 프로젝트 생성(`pom.xml`): Spring Boot 3.x (web, security, thymeleaf, jdbc, quartz starter), Flyway, SQL Server JDBC 드라이버, Lombok(선택).
-- `PLAN.md` §2 패키지 구조대로 빈 패키지/디렉터리 생성.
-- `application.yml` 뼈대 작성: 메타DB 연결(`${DB_URL}`/`${DB_USERNAME}`/`${DB_PASSWORD}` 플레이스홀더), `MASTER_ENCRYPTION_KEY` 플레이스홀더 참조 위치만 마련(실제 암복호화 구현은 T6).
-- `SchedulerServiceApplication` 기동 확인(DB 연결 없이 컨텍스트 로드 실패해도 이 단계에선 허용 — 메타DB는 T2에서 붙음).
+- 레포 루트에 `backend/` 디렉터리를 만들고 그 아래에 Maven 프로젝트(`pom.xml`) 생성: Spring Boot 3.x (web, security, jdbc, quartz starter — **thymeleaf 의존성 없음**, 백엔드는 REST API 전용), Flyway, SQL Server JDBC 드라이버, Lombok(선택).
+  - **Spring Boot 패치 버전은 지금 시점에 독립적으로 확인해서 고정할 것.** PLAN.md §1의 지침대로, 현재 안정적인 최신 3.x 패치 버전을 확인하고 그 버전을 쓰는 근거(Java 17/21 LTS 호환, 알려진 치명적 버그 없음 등)를 1~2줄로 `pom.xml` 근처 커밋 메시지 또는 README에 남긴다. 다른 무관한 프로젝트의 `pom.xml`/빌드 설정을 그대로 복사하지 않는다 — 베낀 것으로 보이면 반려 대상.
+- `PLAN.md` §2의 `backend/` 트리 그대로 빈 패키지/디렉터리 생성(`engine/quartz`, `engine/execution`, `engine/action`, `engine/sp`, `domain/*`, `infra/*`, `web/api`, `security` — `web/admin` 없음).
+- `application.yml` 뼈대 작성: 메타DB 연결(`${DB_URL}`/`${DB_USERNAME}`/`${DB_PASSWORD}` 플레이스홀더), `MASTER_ENCRYPTION_KEY` 플레이스홀더, `app.cors.allowed-origin` 플레이스홀더(실제 CORS 설정은 T2/T9에서 완성) 참조 위치만 마련.
+- `SchedulerServiceApplication` 기동 확인(DB 연결 없이 컨텍스트 로드 실패해도 이 단계에선 허용 — 메타DB는 T3에서 붙음).
 
-**DoD**: `mvn clean package` 성공. 디렉터리 구조가 PLAN.md §2와 일치. README 또는 `CLAUDE.md`에 "환경변수로 뭘 넣어야 로컬 기동이 되는지" 1차 안내 문구 존재.
+**DoD**: `backend/`에서 `mvn clean package` 성공. 디렉터리 구조가 PLAN.md §2의 `backend/` 트리와 일치. 사용한 Spring Boot 정확 버전과 선정 근거가 문서화됨. README 또는 `CLAUDE.md`에 "환경변수로 뭘 넣어야 로컬 기동이 되는지" 1차 안내 문구 존재.
 
 ---
 
-### T2. 메타DB 스키마 — Flyway 마이그레이션 (실행이력 제외)
+### T2. 프론트엔드 스캐폴딩 + CORS 연동 준비
+
+- 레포 루트에 `frontend/` 디렉터리를 만들고 React SPA 프로젝트 생성(빌드 도구는 구현 시점에 worker가 판단 — Vite 등 표준적인 선택이면 충분, 특정 도구를 강제하지 않음).
+- `frontend/src/api/` 에 백엔드 호출 클라이언트 스켈레톤 생성: base URL을 환경변수(`.env.local`, gitignore)로 주입받도록 구성, `.env.example`에 플레이스홀더만 커밋.
+- `frontend/src/pages/` 에 PLAN.md §7의 8개 화면에 대응하는 빈 페이지 컴포넌트 생성(내용 구현은 T12).
+- 백엔드 `security/CorsConfig`를 추가(또는 T1에서 만든 자리에 실제 구현): `app.cors.allowed-origin` 환경변수로 받은 오리진만 허용. 로컬 개발 시 프론트 dev 서버 오리진을 넣어 실제로 브라우저에서 CORS 에러 없이 백엔드 헬스체크 엔드포인트를 호출할 수 있는지 1회 확인.
+
+**DoD**: `frontend/`에서 로컬 개발 서버 기동 성공. 빈 페이지 라우팅이 동작. 프론트 dev 서버에서 백엔드(T1에서 띄운 빈 애플리케이션)로 보낸 테스트 fetch가 CORS 에러 없이 응답을 받음(또는 받아야 할 에러만 받음 — 인증 미구현 상태의 401 등은 허용, CORS 차단은 불허).
+
+---
+
+### T3. 메타DB 스키마 — Flyway 마이그레이션 (실행이력 제외)
 
 - `schedule_definition`, `schedule_parameter`, `target_db_config`, `credential`, `admin_user` 테이블 Flyway 마이그레이션 작성(PLAN.md §4.1~4.5 컬럼 그대로).
 - Quartz 공식 SQL Server `QRTZ_*` DDL 스크립트를 마이그레이션에 포함(직접 설계하지 않고 Quartz 배포본의 표준 스크립트 사용).
@@ -27,7 +40,7 @@
 
 ---
 
-### T3. 도메인 모델 + Repository 인터페이스/구현
+### T4. 도메인 모델 + Repository 인터페이스/구현
 
 - `domain/schedule`: `ScheduleDefinition`, `ScheduleParameter`, `ActionType`, `GroupingMode` (값 객체/엔티티), `ScheduleRepository`/`ScheduleParameterRepository` 인터페이스.
 - `domain/config`: `TargetDbConfig`, `Credential`, 해당 Repository 인터페이스.
@@ -39,17 +52,17 @@
 
 ---
 
-### T4. 비밀값 암복호화 (`infra/crypto`)
+### T5. 비밀값 암복호화 (`infra/crypto`)
 
 - `CredentialCipher`: AES-GCM, 마스터키를 환경변수(`MASTER_ENCRYPTION_KEY`, base64)에서 로드해 `credential.encrypted_value`/`target_db_config.encrypted_password` 암복호화.
 - 마스터키 미설정 시 기동 실패(명확한 에러 메시지)로 처리 — 운영 비밀값이 평문으로 새는 상황을 막기 위한 fail-fast.
-- `CredentialRepository`/`TargetDbConfigRepository` 구현체가 저장 시 암호화, 조회 시 복호화하도록 T3 구현에 연결.
+- `CredentialRepository`/`TargetDbConfigRepository` 구현체가 저장 시 암호화, 조회 시 복호화하도록 T4 구현에 연결.
 
 **DoD**: 단위 테스트로 "저장 시 암호화된 값이 DB에 들어가고, 조회 API/서비스 레벨에서는 평문이 복원됨"을 확인. 평문이 로그에 출력되지 않음을 코드 리뷰로 확인.
 
 ---
 
-### T5. 실행 엔진 코어 — `ExecutionResult` / `Sink` / SP 호출 / 액션 핸들러
+### T6. 실행 엔진 코어 — `ExecutionResult` / `Sink` / SP 호출 / 액션 핸들러
 
 이번 작업이 "교정사항 #1·#2·#3·#5·#6"을 실제로 코드 경계로 만드는 핵심 단계.
 
@@ -66,9 +79,9 @@
 
 ---
 
-### T6. Quartz 연동 — 동적 등록/해제
+### T7. Quartz 연동 — 동적 등록/해제
 
-- `engine/quartz/QuartzConfig`: JDBC JobStore 빈 설정(T2의 `QRTZ_*` 테이블 사용).
+- `engine/quartz/QuartzConfig`: JDBC JobStore 빈 설정(T3의 `QRTZ_*` 테이블 사용).
 - `engine/quartz/GenericScheduleJob`: `Job` 구현, `JobDataMap`에는 `scheduleId`만 담고 실행 시점에 최신 `ScheduleDefinition`을 재조회 후 `ScheduleExecutor.execute(scheduleId, SCHEDULED)` 호출. `@DisallowConcurrentExecution` 적용.
 - `engine/quartz/ScheduleRegistrar`: `register(ScheduleDefinition)`/`reschedule(...)`/`unregister(scheduleId)` — `CronTrigger` 생성/교체/삭제를 감싸는 얇은 래퍼.
 - 애플리케이션 기동 시 `enabled=true`인 `schedule_definition` 전체를 읽어 `ScheduleRegistrar.register(...)` 호출하는 `ApplicationRunner`(또는 `@EventListener(ApplicationReadyEvent)`).
@@ -77,17 +90,17 @@
 
 ---
 
-### T7. 관리자 REST API — 스케줄 CRUD + 파라미터
+### T8. 관리자 REST API — 스케줄 CRUD + 파라미터
 
 - `web/api/ScheduleController`, `ScheduleParameterController`: PLAN.md §6 "스케줄 CRUD + 파라미터" 표의 엔드포인트 구현.
-- 생성/수정/삭제/활성화토글 시 T6의 `ScheduleRegistrar`를 호출해 Quartz 상태를 즉시 동기화.
+- 생성/수정/삭제/활성화토글 시 T7의 `ScheduleRegistrar`를 호출해 Quartz 상태를 즉시 동기화.
 - 요청 바디 검증: `action_type`에 맞는 `action_config` 모양 검증(예: `API_CALL`인데 `url` 없음 → 400), cron 표현식 유효성 검증.
 
 **DoD**: API 테스트(MockMvc 등)로 CRUD 전 경로 + 유효성 검증 실패 케이스 + "수정 시 Quartz 트리거가 실제로 바뀜"까지 확인.
 
 ---
 
-### T8. 관리자 REST API — 즉시실행 + 최근결과 조회 (교정사항 #4)
+### T9. 관리자 REST API — 즉시실행 + 최근결과 조회 (교정사항 #4)
 
 - `web/api/ScheduleExecutionController`:
   - `POST /api/schedules/{id}/run-now` → `ScheduleExecutor.execute(scheduleId, MANUAL)`을 **동기 호출**하고 결과(`ExecutionResult` + 있으면 `DisplayOutput`)를 그대로 응답 바디로 반환.
@@ -99,49 +112,51 @@
 
 ---
 
-### T9. 관리자 REST API — 대상DB/자격증명 설정
+### T10. 관리자 REST API — 대상DB/자격증명 설정
 
 - `web/api/TargetDbConfigController`, `CredentialController`: PLAN.md §6 해당 표 엔드포인트.
 - 응답 시 비밀번호/자격증명 값은 항상 마스킹(끝 4자 등), 평문 반환 엔드포인트 없음.
 - 삭제 시 참조 중인 `schedule_definition`/`action_config`가 있으면 차단 또는 경고.
 
-**DoD**: API 테스트로 CRUD + 마스킹 동작 + 참조 중 삭제 차단 확인. 응답 바디/로그에 평문 비밀값이 노출되지 않음을 테스트로 확인(T4의 fail-fast와 별개로, API 레벨에서도 검증).
+**DoD**: API 테스트로 CRUD + 마스킹 동작 + 참조 중 삭제 차단 확인. 응답 바디/로그에 평문 비밀값이 노출되지 않음을 테스트로 확인(T5의 fail-fast와 별개로, API 레벨에서도 검증).
 
 ---
 
-### T10. 인증 (Spring Security)
+### T11. 인증 (Spring Security) + CORS 최종 설정
 
-- `admin_user` 기반 세션 로그인(`AuthController` + `SecurityConfig`), BCrypt 비밀번호.
-- `/api/**`, `/admin/**` 전체를 인증 필요로 보호(로그인/헬스체크 제외).
+- `admin_user` 기반 로그인(`AuthController` + `SecurityConfig`), BCrypt 비밀번호. 인증 방식(세션 쿠키 vs 토큰)은 SPA가 별도 오리진에서 호출한다는 전제 하에 구현 시점에 확정(세션 쿠키 방식이면 `SameSite`/`Access-Control-Allow-Credentials` 설정 필요).
+- `/api/**` 전체를 인증 필요로 보호(로그인/헬스체크 제외) — 서버 렌더링 화면이 없으므로 `/admin/**` 같은 경로는 존재하지 않음.
+- T2에서 자리 잡은 `CorsConfig`를 운영 프론트엔드 배포 오리진까지 포함하도록 최종 확정(`app.cors.allowed-origin`을 여러 오리진 허용하도록 확장 필요 시 반영).
 - 최초 기동 시 관리자 계정이 하나도 없으면 환경변수(`INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`)로 1회 시드하는 로직(부트스트랩 문제 해결 — 레거시엔 이런 보호가 없었으므로 신규).
 
-**DoD**: 인증 없이 `/api/**` 호출 시 401/302(로그인 리다이렉트), 로그인 후 정상 호출. 최초 기동 시 시드 계정으로 로그인 가능함을 통합 테스트로 확인.
+**DoD**: 인증 없이 `/api/**` 호출 시 401. 로그인 후 정상 호출. 프론트엔드 dev 서버 오리진에서 실제 로그인 플로우가 CORS 에러 없이 동작. 최초 기동 시 시드 계정으로 로그인 가능함을 통합 테스트로 확인.
 
 ---
 
-### T11. 관리자 웹 UI (Thymeleaf)
+### T12. 관리자 웹 UI (React SPA, `frontend/`)
 
-- PLAN.md §7의 8개 화면 구현: 로그인, 스케줄 목록, 스케줄 생성/수정(동적 폼), 수동실행 결과, 최근 실행결과 보기, 대상DB 설정, 자격증명 관리, 비밀번호 변경.
-- 스케줄 생성/수정 폼은 `action_type` 선택에 따라 `API_CALL`/`DISPLAY_ONLY` 입력 영역을 JS로 토글.
-- "지금 실행" 버튼 → T8 API 호출 → 같은 화면에서 결과 표시(페이지 리로드 없이 AJAX 권장, 서버사이드 폼 제출도 허용).
+- PLAN.md §7의 8개 페이지 구현: Login, ScheduleList, ScheduleForm(동적 폼), RunResult, LastResult, TargetDbConfig, Credential, ChangePassword — T2에서 만든 빈 페이지에 실제 내용 채움.
+- `ScheduleForm`은 `action_type` 선택에 따라 `API_CALL`/`DISPLAY_ONLY` 입력 영역을 전환하는 컴포넌트로 구현.
+- "지금 실행" 버튼 → T9 API 호출 → 같은 화면(모달/인라인)에서 결과 표시.
+- `frontend/src/api/` 클라이언트가 T8~T11의 모든 엔드포인트를 호출하도록 연결, 인증 실패(401) 시 Login 페이지로 리다이렉트하는 공통 처리.
 
-**DoD**: 브라우저로 직접 조작해 스케줄 생성 → cron 반영 확인(T6 상태 API로 다음 실행시각 확인) → "지금 실행"으로 결과 확인 → 대상DB/자격증명 등록 → 전체 플로우가 재컴파일 없이 동작함을 수동 검증(화면 스크린샷 또는 조작 로그로 보고).
-
----
-
-### T12. 설정/비밀값 최종 점검 (부트스트랩 계층)
-
-- `application.yml`의 메타DB 접속정보, `MASTER_ENCRYPTION_KEY`, `INITIAL_ADMIN_*`가 전부 환경변수 플레이스홀더로만 존재하고 소스에 실제 값이 없는지 점검.
-- `.gitignore`에 로컬 비밀값 파일(`application-local.yml` 등) 등록 확인.
-- "env var만 바꿔서 다른 업체에 재배포" 시나리오를 문서(README)로 1페이지 정리(코드 변경/재컴파일 불필요함을 체크리스트로).
-
-**DoD**: 리포지토리 전체에서 실제 비밀값 리터럴 검색(grep) 결과 0건. README 체크리스트 존재.
+**DoD**: 브라우저로 직접 조작해 로그인 → 스케줄 생성 → cron 반영 확인(T7 상태 API로 다음 실행시각 확인) → "지금 실행"으로 결과 확인 → 대상DB/자격증명 등록 → 전체 플로우가 백엔드 재컴파일 없이, 프론트엔드도 백엔드와 독립적으로 재배포 가능한 구조로 동작함을 수동 검증(화면 스크린샷 또는 조작 로그로 보고).
 
 ---
 
-### T13. 테스트 정리 + 회귀 확인
+### T13. 설정/비밀값 최종 점검 (부트스트랩 계층)
 
-- T1~T12에서 작성된 단위/통합 테스트를 모아 `mvn test` 1회 그린 확인.
+- `backend/application.yml`의 메타DB 접속정보, `MASTER_ENCRYPTION_KEY`, `INITIAL_ADMIN_*`, `app.cors.allowed-origin`이 전부 환경변수 플레이스홀더로만 존재하고 소스에 실제 값이 없는지 점검.
+- `frontend/.env.local`(실제 API URL 등)이 gitignore 처리되어 있는지 점검, `.env.example`에는 플레이스홀더만.
+- "env var만 바꿔서 다른 업체에 재배포" 시나리오를 문서(README)로 1페이지 정리(백엔드/프론트엔드 각각 코드 변경/재컴파일 불필요함을 체크리스트로).
+
+**DoD**: 리포지토리 전체에서 실제 비밀값 리터럴 검색(grep) 결과 0건. README 체크리스트 존재(백엔드/프론트엔드 양쪽 다룸).
+
+---
+
+### T14. 테스트 정리 + 회귀 확인
+
+- T1~T13에서 작성된 백엔드 단위/통합 테스트를 모아 `mvn test` 1회 그린 확인.
 - 레거시 3가지 실행 패턴(주간 1회+그룹발송 / 평일 30분+개별발송 / 평일 1일1회+개별발송, 각각 파라미터 없음)을 **신규 스케줄 정의 데이터로 재현**하는 시나리오 테스트 최소 1개씩(= "레거시 실행흐름이 포팅됐다"는 것의 실증).
 
 **DoD**: `mvn test` 전체 그린. 레거시 3패턴 각각에 대응하는 시나리오 테스트 3개 존재 및 통과.
@@ -150,8 +165,8 @@
 
 ## Future (이번 범위 제외, 별도 라운드)
 
-### T14 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
+### T15 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
 
 - PLAN.md §3.1/§3.2, §6(TBD 명시)에 따라 실행이력 테이블 스키마를 별도로 설계(감시 서버 원칙: 상태/요약만, SP 전체 결과행 보존 금지. 실패 기록 포함).
 - `ExecutionResultSink`의 새 구현(`JdbcExecutionResultSink` 등)을 추가하고 `LoggingExecutionResultSink`와 조합(`CompositeExecutionResultSink`) 또는 교체.
-- **착수 조건**: 이번 TASKS.md 범위(T1~T13) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.
+- **착수 조건**: 이번 TASKS.md 범위(T1~T14) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.

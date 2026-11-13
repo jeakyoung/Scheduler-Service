@@ -15,7 +15,7 @@ import org.testcontainers.containers.MSSQLServerContainer;
 @SpringBootTest
 public abstract class AbstractQuartzIntegrationTest {
 
-    static final MSSQLServerContainer<?> MSSQL = new MSSQLServerContainer<>(
+    public static final MSSQLServerContainer<?> MSSQL = new MSSQLServerContainer<>(
             "mcr.microsoft.com/mssql/server:2022-latest")
             .acceptLicense();
 

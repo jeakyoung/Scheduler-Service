@@ -149,6 +149,15 @@
 - DoD 점검: `mvn test` 전체 56개 테스트 그린(새 테스트 8개 모두 1회차에 통과). `mvn clean package` 재확인 성공.
 - 다음 작업: T9 (관리자 REST API — 즉시실행 + 최근결과 조회).
 
+## 2026-11-13 — T9 관리자 REST API — 즉시실행 + 최근결과 조회 (worker)
+- `engine/execution/LastExecutionResultStore`(스케줄ID→최신 `ExecutionResult` 1건, `ConcurrentHashMap`) 신규 추가 — `DisplayOutputStore`는 `DISPLAY_ONLY`일 때만 채워지므로, PLAN §6의 "`DisplayOutputStore`/마지막 `ExecutionResult`의 인메모리 캐시"를 전체 action_type에 대해 만족시키려면 별도 저장소가 필요했음. `ScheduleExecutor.execute()`가 성공/실패 양쪽 경로 모두에서 이 저장소에도 기록하도록 연결(생성자 시그니처 변경 → 기존 `ScheduleExecutorTest`의 생성자 호출부 전부 업데이트).
+- `web/api/dto/RunResultResponse`(`ExecutionResult` + `DisplayOutput`(nullable) 묶음, run-now/last-result 공용) `web/api/dto/ScheduleStatusResponse`(`nextFireTime`+`running`).
+- `web/api/ScheduleExecutionController`: `POST .../run-now`(`ScheduleExecutor.execute(id, MANUAL)` 동기 호출, `ScheduleAlreadyRunningException`은 `ApiExceptionHandler`가 이미 409로 매핑), `GET .../last-result`(캐시 없으면 204), `GET .../status`(`ScheduleRegistrar.getNextFireTime` + `ScheduleExecutor.isRunning`). 컨트롤러에서 스케줄 존재 여부를 먼저 확인(404) — `ScheduleExecutor.execute()` 내부의 "스케줄 없음"은 바깥 catch-all이 FAILURE `ExecutionResult`로 삼켜버려 그대로는 404가 안 나오기 때문.
+- **테스트 전략**: run-now의 "진짜 SP 왕복"을 검증하려면 모의가 아니라 실제 EXEC가 필요해서, `target_db_config`를 메타DB와 **같은 Testcontainers MSSQL 컨테이너**를 가리키게 하고 그 안에 테스트용 `SP_TEST_SAMPLE`(정적 결과 1행)/`SP_TEST_SLOW`(`WAITFOR DELAY '00:00:03'`, 동시실행 가드 테스트용) 프로시저를 `CREATE OR ALTER`로 만들어 실제 라운드트립을 태움. `AbstractQuartzIntegrationTest.MSSQL` 필드를 테스트 간 공유하려고 `public`으로 가시성 변경.
+- `ScheduleExecutionControllerTest`: (1) run-now가 정규 스케줄(여기선 `enabled:false`로 만들어 Quartz와 완전히 무관함을 강조)과 무관하게 즉시 실행되고 응답에 `ExecutionResult`가 동기적으로 담김, (2) `DISPLAY_ONLY` run-now 응답에 가공된 `displayOutput.rows`가 실제 SP 결과대로 포함됨, (3) run-now 이후 `last-result`가 그 결과를 반영(직전엔 204), (4) `SP_TEST_SLOW`로 한 실행을 붙잡아 둔 채 동시에 두 번째 run-now 호출 시 409 확인.
+- DoD 점검: `mvn test` 전체 60개 테스트 그린. `mvn clean package` 재확인 성공.
+- 다음 작업: T10 (관리자 REST API — 대상DB/자격증명 설정).
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.

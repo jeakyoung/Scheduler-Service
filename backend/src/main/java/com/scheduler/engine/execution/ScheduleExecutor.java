@@ -37,6 +37,7 @@ public class ScheduleExecutor {
     private final Map<ActionType, ActionHandler> actionHandlersByType;
     private final ExecutionResultSink executionResultSink;
     private final DisplayOutputStore displayOutputStore;
+    private final LastExecutionResultStore lastExecutionResultStore;
 
     private final Map<Long, Boolean> runningScheduleIds = new ConcurrentHashMap<>();
 
@@ -47,7 +48,8 @@ public class ScheduleExecutor {
             StoredProcedureInvoker storedProcedureInvoker,
             Map<ActionType, ActionHandler> actionHandlersByType,
             ExecutionResultSink executionResultSink,
-            DisplayOutputStore displayOutputStore
+            DisplayOutputStore displayOutputStore,
+            LastExecutionResultStore lastExecutionResultStore
     ) {
         this.scheduleRepository = scheduleRepository;
         this.scheduleParameterRepository = scheduleParameterRepository;
@@ -56,6 +58,7 @@ public class ScheduleExecutor {
         this.actionHandlersByType = new EnumMap<>(actionHandlersByType);
         this.executionResultSink = executionResultSink;
         this.displayOutputStore = displayOutputStore;
+        this.lastExecutionResultStore = lastExecutionResultStore;
     }
 
     /** Used by web/api's status endpoint (PLAN.md §6) to report "currently running". */
@@ -77,6 +80,7 @@ public class ScheduleExecutor {
         try {
             ExecutionResult result = doExecute(scheduleId, triggerType, startedAt);
             executionResultSink.record(result);
+            lastExecutionResultStore.put(result);
             return result;
         } catch (Exception e) {
             ExecutionResult failure = new ExecutionResult(
@@ -84,6 +88,7 @@ public class ScheduleExecutor {
                     ExecutionStatus.FAILURE, "실행 중 오류 발생", shortMessage(e)
             );
             executionResultSink.record(failure);
+            lastExecutionResultStore.put(failure);
             return failure;
         } finally {
             runningScheduleIds.remove(scheduleId);

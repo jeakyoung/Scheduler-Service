@@ -48,6 +48,7 @@ class ScheduleExecutorTest {
     private CredentialRepository credentialRepository;
     private FakeExecutionResultSink sink;
     private DisplayOutputStore displayOutputStore;
+    private LastExecutionResultStore lastExecutionResultStore;
 
     private HttpServer httpServer;
     private final List<String> receivedBodies = new CopyOnWriteArrayList<>();
@@ -63,6 +64,7 @@ class ScheduleExecutorTest {
         credentialRepository = mock(CredentialRepository.class);
         sink = new FakeExecutionResultSink();
         displayOutputStore = new DisplayOutputStore();
+        lastExecutionResultStore = new LastExecutionResultStore();
 
         when(scheduleParameterRepository.findByScheduleId(anyLong())).thenReturn(List.of());
         when(targetDbConfigRepository.findById(TARGET_DB_CONFIG_ID)).thenReturn(Optional.of(
@@ -104,7 +106,8 @@ class ScheduleExecutorTest {
                         ActionType.DISPLAY_ONLY, new DisplayOnlyActionHandler()
                 ),
                 sink,
-                displayOutputStore
+                displayOutputStore,
+                lastExecutionResultStore
         );
     }
 
@@ -199,7 +202,7 @@ class ScheduleExecutorTest {
                 scheduleRepository, scheduleParameterRepository, targetDbConfigRepository,
                 storedProcedureInvoker,
                 Map.of(ActionType.DISPLAY_ONLY, new DisplayOnlyActionHandler()),
-                alternateSink, displayOutputStore
+                alternateSink, displayOutputStore, lastExecutionResultStore
         );
 
         executor.execute(SCHEDULE_ID, TriggerType.MANUAL);

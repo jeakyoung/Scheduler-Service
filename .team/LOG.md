@@ -67,3 +67,13 @@
 - README에 backend/frontend 분리 구조, CORS 환경변수, Spring Boot 버전 선정 근거 보강.
 - DoD 점검: `cd backend && mvn clean package` 성공(jar 생성 확인). 디렉터리 구조가 갱신된 PLAN.md §2 `backend/` 트리와 일치(`web/admin`/templates 없음). `grep -ri thymeleaf backend/pom.xml backend/src` 결과 0건. 버전 선정 근거 README/커밋에 기록됨.
 - 다음 작업: T2 (프론트엔드 Vite+React 스캐폴딩 + CORS 실제 구현/검증).
+
+## 2026-11-13 — T2 프론트엔드 스캐폴딩 + CORS 연동 (worker)
+- `frontend/`에 Vite + React + TypeScript 템플릿(`npm create vite@latest frontend -- --template react-ts`) 생성, `react-router-dom` 추가. 빌드도구는 TASKS.md 지침대로 Vite로 직접 판단(표준적 선택, 강제되지 않음).
+- `src/api/client.ts`: 백엔드 호출 공용 fetch 클라이언트, base URL은 `import.meta.env.VITE_API_BASE_URL`(기본값 `http://localhost:8080`)로만 주입 — 하드코딩 없음. `.env.example`(플레이스홀더)만 커밋, 실값은 `.env.local`(gitignore, Vite 기본 `*.local` 패턴으로 커버됨).
+- `src/pages/`에 PLAN.md §7 8개 화면 대응 빈 페이지(Login/ScheduleList/ScheduleForm/RunResult/LastResult/TargetDbConfig/Credential/ChangePassword) 생성, `App.tsx`에 `react-router-dom` 라우팅 연결(`main.tsx`에 `BrowserRouter` 래핑). Vite 템플릿의 counter 데모 잔재(`App.css`, `assets/*`) 제거.
+- 백엔드: `security/CorsConfig`(실제 구현 — `app.cors.allowed-origin` 콤마구분 오리진만 허용하는 `CorsConfigurationSource` 빈) + `security/SecurityConfig`(Spring Security 필터체인에 `.cors(...)` 연결, 현재는 `permitAll()` — **T11 이전 임시 상태, 최종 인증 적용은 T11**) + `web/api/HealthController`(`GET /api/health` → `{"status":"UP"}`, CORS 점검용 헬스체크) 추가.
+- **CORS 실제 검증**: Docker 데몬을 기동해(T1에서 백그라운드로 띄워둔 Docker Desktop이 이 시점에 준비됨) 로컬 전용 SQL Server 컨테이너(`scheduler-meta-db`, 임시 개발용 비밀번호, 프로덕션 설정 아님)를 띄우고 그 위에서 백엔드를 실행(`spring.quartz.auto-startup=false`로 1회성 오버라이드 — QRTZ_* 테이블이 아직 없어서 Quartz 스케줄러 기동이 막히는 것은 T3에서 해결할 정상적인 선행조건 문제, 커밋되는 설정은 아님). `curl`로 프론트 오리진(`http://localhost:5173`)을 흉내 낸 OPTIONS preflight + 실제 GET을 `/api/health`에 보내 `Access-Control-Allow-Origin: http://localhost:5173` 등 헤더가 정확히 반환됨을 확인(브라우저 자동화 도구가 없어 브라우저가 수행하는 것과 동일한 CORS 체크를 curl로 재현). 이어서 `npm run dev`로 Vite 개발 서버가 실제로 5173에서 뜨는 것도 확인.
+- DoD 점검: 프론트 `npm run build`/`tsc --noEmit` 성공, 빈 페이지 라우팅 구성 확인. 백엔드-프론트 CORS 교차 요청에서 차단(CORS 에러) 없음 확인(인증 미구현 상태라 `permitAll` 상태의 200 응답, T11 이후엔 401로 바뀔 것). README에 프론트 환경변수/빌드·실행/CORS 검증 방법 보강.
+- 검증 후 정리: 백엔드(mvn spring-boot:run)·프론트(vite dev) 프로세스 종료, SQL Server 컨테이너(`scheduler-meta-db`)는 T3의 Flyway 마이그레이션 검증에 재사용할 예정이라 유지.
+- 다음 작업: T3 (메타DB 스키마 Flyway 마이그레이션).

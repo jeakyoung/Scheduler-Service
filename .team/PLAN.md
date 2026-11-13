@@ -43,7 +43,7 @@ RESEARCH.md (c)의 추천을 그대로 채택한다. 조정 없음.
 | 프레임워크 | Spring Boot 3.x (백엔드는 **REST API 전용** — 화면 렌더링 없음) | Quartz 통합(`spring-boot-starter-quartz`), `@ConfigurationProperties`/Profile로 (2)의 외부 설정 주입을 프레임워크 차원에서 지원, Spring Security로 API 인증. **구체적 패치 버전은 이 문서에서 고정하지 않음 — 아래 "Spring Boot 버전 지침" 참고** |
 | 스케줄링 | Quartz (JDBC JobStore) | RESEARCH (a) 결론 그대로: 임의 cron 지원·재시작 복구·(향후 다중 인스턴스 대비) 트리거 락킹을 기본 제공. **단일 프로세스 전제**(§0)이므로 다중 인스턴스 락킹은 "현재 필요"가 아니라 "future-proofing에 거의 비용 없이 따라오는 보너스"로 간주 — 이것 때문에 Quartz를 선택한 것은 아니고, 임의 cron + 재시작 복구만으로도 선택 이유가 충분하다 |
 | 메타DB (스케줄 정의/설정/Quartz 상태 저장) | SQL Server | Quartz JDBC JobStore 공식 지원, 팀의 기존 SQL Server 운영 경험 |
-| 대상 업무 DB(SP를 호출할 대상) | SQL Server 기본, 드라이버 교체로 타 DBMS 허용 | 레거시와 동일(SQL Server) 전제가 기본이지만, 업체마다 다를 수 있으므로 `target_db_config`에 `db_type`을 필드로 둬 코드 변경 없이 선택 가능하게 함(단, 해당 DBMS JDBC 드라이버가 클래스패스에 있어야 함 — 이는 패키징/배포 문제이고 PLAN 범위에서는 SQL Server 드라이버만 기본 포함) |
+| 대상 업무 DB(SP를 호출할 대상) | SQL Server로 고정 (멀티-DBMS 지원 없음) | 사용자 확인: 연결정보(URL/계정)는 업체마다 다르지만 대상 DB 자체는 모든 솔루션이 MSSQL로 구성됨 — 멀티-DBMS 지원은 불필요한 범용성(2026-11-13 교정). `target_db_config`에 `db_type` 같은 DBMS 선택 필드 없음(§4.3 참고) |
 | 빌드도구 | Maven | RESEARCH 근거 동일(온보딩 마찰 최소) |
 | 배포 형태 | Spring Boot 실행 가능 jar(내장 톰캣) | 컨테이너화·운영 단순성. WAR 패키징도 기술적으로 가능하지만 기본값은 jar |
 | 관리자 웹 UI | **React (SPA), 백엔드와 완전히 분리된 별도 프론트엔드 앱** | 백엔드는 REST API만 제공, 화면은 별도 React 앱이 그 API를 호출하는 구조로 분리(2026-11-13 3차 교정, 사용자 직접 지시). Spring Boot를 Thymeleaf 서버 렌더링에 쓰지 않는다 — 프론트/백엔드가 독립적으로 빌드·배포되므로 CORS 허용 오리진 설정이 백엔드에 필요(§6 참고) |
@@ -183,6 +183,8 @@ interface ExecutionResultSink {
 ## 4. DB 스키마 (메타DB, SQL Server)
 
 > **실행이력 테이블은 이번 라운드에 스키마를 만들지 않는다 (TBD).** 설계 시점에 §3의 `ExecutionResult`/감시-서버 원칙(교정사항 #6: 상태/요약만, 전체 결과행 보존 금지)을 따를 것.
+>
+> **적용 범위 명확화**: 아래 §4.1~4.6의 Flyway 마이그레이션은 **엔진 자신의 메타DB(스케줄 정의/설정/Quartz 상태 저장용)에만** 적용된다. `target_db_config`가 가리키는 **대상 업무 DB(SP가 실제로 존재하는 업체 DB)에는 Flyway가 전혀 적용되지 않는다** — 엔진은 그 DB에 대해 스키마 변경 권한도, DDL 실행 기능도 갖지 않는다(§9 참고).
 
 ### 4.1 `schedule_definition` — 스케줄(Job) 정의
 
@@ -217,12 +219,13 @@ interface ExecutionResultSink {
 
 ### 4.3 `target_db_config` — SP를 실행할 대상 업무 DB 접속정보
 
+**대상 업무 DB는 MSSQL(SQL Server)로 고정한다.** 사용자 확인 결과, 연결정보(URL/계정)는 업체마다 다르지만 대상 DB 자체는 모든 솔루션이 MSSQL로 구성되어 있어 멀티-DBMS 지원은 불필요한 범용성이다(2026-11-13 교정, 사용자 직접 확인) — 따라서 `db_type` 같은 DBMS 선택 필드를 두지 않는다. 연결정보(URL/계정/비밀번호)만 관리자 웹에서 업체별로 입력받는다.
+
 | 컬럼 | 타입 | 설명 |
 |---|---|---|
 | id | BIGINT PK | |
 | name | NVARCHAR(100) | 관리자 UI 표시용 (예: "iPlusERP 운영") |
-| db_type | NVARCHAR(20) | `SQLSERVER`(기본) \| 기타 — 드라이버 교체는 배포 시점 과제 |
-| jdbc_url | NVARCHAR(500) | |
+| jdbc_url | NVARCHAR(500) | MSSQL JDBC URL 전제 |
 | username | NVARCHAR(200) | |
 | encrypted_password | NVARCHAR(MAX) | AES-GCM 암호화, 마스터키는 환경변수 |
 | created_at / updated_at | DATETIME2 | |
@@ -398,3 +401,5 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 - 멀티테넌시(한 프로세스가 여러 업체를 동시 서빙) — §0 근거에 따라 범위 밖
 - 복잡한 역할/권한 체계 — 단일 ADMIN 역할만
 - 다중 인스턴스 운영을 전제로 한 설계(분산 락 등 직접 구현) — Quartz JDBC JobStore가 부가적으로 제공하지만, 이를 적극적으로 활용/검증하는 것은 범위 밖(§0 전제: 단일 인스턴스)
+- 대상 업무 DB에 대한 **DDL 실행/신규 SP 생성 기능** — 엔진은 업체 DB에 **이미 존재하는 SP를 호출만** 하고, 생성/수정하지 않는다(사용자 확인: "의미 없을 것 같다, DDL 생성안은 보류" — 이번뿐 아니라 앞으로도 범위에 넣지 않기로 확정)
+- 대상 업무 DB에 대한 멀티-DBMS 지원 — MSSQL로 고정(§1, §4.3 참고)

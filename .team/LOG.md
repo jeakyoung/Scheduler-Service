@@ -77,3 +77,25 @@
 - DoD 점검: 프론트 `npm run build`/`tsc --noEmit` 성공, 빈 페이지 라우팅 구성 확인. 백엔드-프론트 CORS 교차 요청에서 차단(CORS 에러) 없음 확인(인증 미구현 상태라 `permitAll` 상태의 200 응답, T11 이후엔 401로 바뀔 것). README에 프론트 환경변수/빌드·실행/CORS 검증 방법 보강.
 - 검증 후 정리: 백엔드(mvn spring-boot:run)·프론트(vite dev) 프로세스 종료, SQL Server 컨테이너(`scheduler-meta-db`)는 T3의 Flyway 마이그레이션 검증에 재사용할 예정이라 유지.
 - 다음 작업: T3 (메타DB 스키마 Flyway 마이그레이션).
+
+## 2026-11-13 — T3 메타DB 스키마 Flyway 마이그레이션 (worker)
+- `V1__schedule_core.sql`: PLAN.md §4.1~4.5 컬럼 그대로 `target_db_config`/`credential`/`admin_user`/`schedule_definition`/`schedule_parameter` 5개 테이블 작성(FK: schedule_definition→target_db_config, schedule_parameter→schedule_definition ON DELETE CASCADE). 실행이력 테이블은 작성하지 않음(§4/§9 TBD 명시 그대로 준수).
+- `V2__quartz_tables.sql`: `quartz-2.3.2.jar` 안의 공식 `org/quartz/impl/jdbcjobstore/tables_sqlServer.sql`을 추출해 거의 그대로 사용(직접 설계 안 함, PLAN.md §4.6 그대로) — 유일한 변경은 선두의 `USE [enter_db_name_here]` 제거(Flyway 커넥션이 이미 대상 DB를 바라봄).
+- **버그 발견 및 수정**: T1에서 작성해둔 `application.yml`의 Quartz `driverDelegateClass`가 범용 `StdJDBCDelegate`였는데, 추출한 공식 DDL 스크립트 맨 위 주석이 "SQL Server를 쓸 땐 `org.quartz.impl.jdbcjobstore.MSSQLDelegate`로 설정하라"고 명시하고 있었음. 실제로 로컬 SQL Server 컨테이너에 Quartz를 기동해보니 `StdJDBCDelegate`의 `SELECT ... FOR UPDATE` 락 SQL이 SQL Server T-SQL 문법 오류(`FOR UPDATE clause allowed only for DECLARE CURSOR`)로 기동 실패 → `MSSQLDelegate`로 교정 후 재기동해 정상 기동(해당 delegate가 `WITH (UPDLOCK,ROWLOCK)` 락 SQL로 자동 전환되는 로그로 확인) 확인.
+- **검증**: Docker(`scheduler-meta-db` 컨테이너, T2에서 CORS 검증용으로 띄워둔 것 재사용)에 `scheduler_meta` DB 생성 → 백엔드를 그 DB를 가리키게 실행 → Spring Boot 기동 시 Flyway가 자동으로 V1→V2 순서로 마이그레이션 적용(`Successfully applied 2 migrations to schema [dbo], now at version v2`) → `sqlcmd`로 `sys.tables` 조회해 5개 메타 테이블 + 10개 QRTZ_* 테이블 + `flyway_schema_history`만 존재하고 **실행이력 테이블은 없음**을 확인. Quartz 스케줄러도 `MSSQLDelegate` 교정 후 실제로 "Scheduler ... started" 상태까지 정상 기동됨을 확인(이 작업 자체는 T6/T7 몫이지만 Quartz 설정의 DB 호환성은 T3의 DDL 작업과 직결되어 같이 검증).
+- DoD 점검: Flyway 마이그레이션이 (Spring Boot 기동을 통한 자동 적용 경로로) 에러 없이 전체 테이블 생성, 실행이력 테이블 의도적 제외 확인.
+- 검증 후 정리: 백엔드 프로세스 종료, SQL Server 컨테이너(`scheduler-meta-db`)는 T4 이후 Repository 구현 테스트에도 재사용 예정이라 유지.
+- 다음 작업: T4 (도메인 모델 + Repository 인터페이스/구현).
+
+## 2026-11-13 — T3 교정: `target_db_config.db_type` 컬럼 제거 (사용자 직접 확인)
+- 사용자가 PLAN.md §1/§4.3/§9를 재확정: 대상 업무 DB는 모든 솔루션이 MSSQL로 고정이라 멀티-DBMS 지원이 불필요 → `target_db_config`에서 `db_type` 컬럼 제거, §9에 "엔진은 대상 업무 DB에 DDL/신규 SP 생성 기능 없음(기존 SP 호출만)"이 범위 밖으로 명시 추가(기존 구현 전제와 일치, 문서만 명확해진 것).
+- `V1__schedule_core.sql`의 `target_db_config`에서 `db_type NVARCHAR(20) NOT NULL DEFAULT 'SQLSERVER'` 컬럼 제거(+주석으로 이유 명시). 도메인/Repository 코드는 아직 T4 전이라 `db_type` 참조가 전혀 없었음(grep 0건) — 추가 수정 불필요.
+- 이미 로컬 SQL Server 컨테이너(`scheduler-meta-db`)에 수정 전 V1/V2가 적용돼 있던 상태라, 컨테이너를 내리고 새로 띄운 뒤 `scheduler_meta` DB를 재생성해 V1(수정판)→V2를 처음부터 깨끗하게 재적용 — "Successfully applied 2 migrations... now at version v2" 확인, `target_db_config` 컬럼 목록에 `db_type` 없음을 `INFORMATION_SCHEMA.COLUMNS` 조회로 확인, Quartz도 정상 기동 확인.
+- DoD 재점검: 마이그레이션 깨끗하게 적용 + 실행이력 테이블 없음 + `db_type` 컬럼 없음, 3가지 모두 확인됨.
+
+## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
+- 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
+- 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.
+- 사용자에게 "SP를 생성하거나 호출하거나"의 '생성'이 업체 DB에 신규 SP를 만드는(DDL) 기능까지 의미하는지 확인 질문 → 사용자 답변: **"의미 없을 것 같다, DDL 생성안은 보류"** → 엔진은 기존에 만들어진 SP를 호출만 한다는 기존 전제 유지, SP 생성/DDL 기능은 범위 제외로 명시 확정.
+- 영향: PLAN.md §4.3(`target_db_config`에서 `db_type` 컬럼 제거, MSSQL 전제 명시), §9(범위 밖 목록에 "대상 업무 DB에 대한 DDL/SP 생성 기능 — 호출만 지원" 추가), TASKS.md 해당 작업 설명 업데이트.
+- sched-worker가 T3(메타DB 마이그레이션)을 완료하고 커밋 직전(staged, uncommitted) 상태였는데 `V1__schedule_core.sql`에 `db_type NVARCHAR(20) DEFAULT 'SQLSERVER'` 컬럼이 포함되어 있어 `esc`로 중단 → idle 확인, 커밋 안 됨(staged 상태) 확인. 다음 단계: sched-planner에게 PLAN.md §4.3/§9 수정 지시 → sched-worker에게 마이그레이션 파일에서 db_type 제거 후 T3 커밋부터 이어서 진행 지시.

@@ -21,7 +21,11 @@ spring:
         quartz:
           jobStore:
             class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
-            driverDelegateClass: org.quartz.impl.jdbcjobstore.StdJDBCDelegate
+            # MSSQLDelegate (not the generic StdJDBCDelegate) - the official Quartz SQL
+            # Server DDL script (V2__quartz_tables.sql) itself calls this out: SQL Server
+            # doesn't support ANSI "SELECT ... FOR UPDATE" row locking, which StdJDBCDelegate
+            # relies on and MSSQLDelegate works around.
+            driverDelegateClass: org.quartz.impl.jdbcjobstore.MSSQLDelegate
             tablePrefix: QRTZ_
             isClustered: false
           scheduler:

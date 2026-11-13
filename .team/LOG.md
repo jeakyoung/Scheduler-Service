@@ -158,6 +158,15 @@
 - DoD 점검: `mvn test` 전체 60개 테스트 그린. `mvn clean package` 재확인 성공.
 - 다음 작업: T10 (관리자 REST API — 대상DB/자격증명 설정).
 
+## 2026-11-13 — T10 관리자 REST API — 대상DB/자격증명 설정 (worker)
+- `web/api/Masking`(끝 4자만 노출, 나머지 `*`) — `target_db_config`/`credential` 양쪽 응답에 공용 사용.
+- `web/api/TargetDbConfigController`: PLAN §6 CRUD 4종. 삭제 시 `scheduleRepository.findAll()`에서 `targetDbConfigId` 일치하는 스케줄이 하나라도 있으면 **차단**(409, PLAN 문구 "차단" 그대로) — DB의 실제 FK 제약도 있지만, 500 대신 깔끔한 409+참조 스케줄 이름 목록을 주려고 애플리케이션 레벨에서 먼저 확인.
+- `web/api/CredentialController`: PLAN §6 CRUD 4종. 삭제는 PLAN 문구가 "차단"이 아니라 "**경고**"라서 다르게 설계 — 참조하는 스케줄이 있으면 기본은 409(참조 스케줄 목록 포함)지만, `?force=true` 쿼리파라미터로 명시적으로 넘기면 경고를 무시하고 삭제 진행. 참조 탐지는 `schedule_definition.action_config` 문자열에 `${cred:NAME}` 부분문자열이 있는지 스캔(관리자 도구 규모라 전체스캔으로 충분, 별도 인덱스/역참조 테이블 불필요).
+- `web/api/ResourceInUseException`(+`NoSuchElementException` → 404) `ApiExceptionHandler`에 추가.
+- **버그 발견/수정(테스트 작성 중)**: `CredentialControllerTest`에서 참조 스케줄을 만들 때 `target_db_config_id`를 존재하지 않는 `1L`로 하드코딩했다가 FK 제약 위반으로 실패할 뻔함 — 실제로 실행하기 전에 발견, `seedTargetDbConfig()` 헬퍼로 실제 행을 먼저 만들도록 교정.
+- DoD 점검: `mvn test` 전체 70개 테스트 그린 — CRUD, 마스킹(응답 바디에 평문 비밀값 없음을 `doesNotContain`으로 직접 확인), `target_db_config`는 참조 중 삭제 차단, `credential`은 참조 중 기본 차단 + `force=true`로 강제 삭제 둘 다 확인. `mvn clean package` 재확인 성공.
+- 다음 작업: T11 (인증 — Spring Security, JWT 기반으로 확정됨) + CORS 최종 설정.
+
 ## 2026-11-13 11:0x — 범위 확인: Flyway 적용 대상 + 대상DB는 MSSQL 고정 + SP 생성(DDL) 범위 제외
 - 사용자 질문: "Flyway를 왜 쓰는지, 신규 DB를 구축해서 마이그레이션할 일이 없지 않은지" — orchestrator가 답변: Flyway는 **업체의 업무 DB(SP가 이미 있는 DB)에는 전혀 적용하지 않는다.** 엔진 자신의 메타DB(schedule_definition 등 + Quartz QRTZ_*)에만 적용되는 것으로, 기존 설계와 일치함(변경 없음, 오해 해소).
 - 사용자 추가 정보: "업체마다 다른 연결정보는 홈페이지(관리자 웹)에서 받아서 사용", "DB는 모든 솔루션이 MSSQL로 구성되어 있다" → `target_db_config.db_type`(SQLSERVER\|기타) 같은 멀티-DBMS 범용성은 불필요, MSSQL 고정으로 단순화 필요.

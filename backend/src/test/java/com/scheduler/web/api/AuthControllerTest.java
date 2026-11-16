@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -20,7 +21,16 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+/**
+ * This class's whole point is verifying auth is enforced by default, so it pins
+ * app.auth.disabled=false directly (highest-precedence test property, overrides any
+ * AUTH_DISABLED left set in the host shell) rather than relying on application.yml's
+ * ${AUTH_DISABLED:false} default - otherwise a developer/CI box with AUTH_DISABLED=true
+ * already exported would silently flip protectedEndpointWithoutTokenIsUnauthorized and
+ * garbageTokenIsUnauthorized from 401 to 200.
+ */
 @AutoConfigureMockMvc
+@TestPropertySource(properties = "app.auth.disabled=false")
 class AuthControllerTest extends AbstractRepositoryIntegrationTest {
 
     @Autowired

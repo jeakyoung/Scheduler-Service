@@ -307,3 +307,11 @@
 - DoD 점검: `mvn test` 전체 **100개 테스트 그린**(기존 98 + 신규 2, 기존 SQL Server/Testcontainers 테스트 전부 무변경·영향 없음 확인). `mvn clean package` 재확인 성공. H2 fallback 실제 기동 + API 호출 수동 확인 완료(위 설명).
 - 설계상 막힌 지점 없음 — H2 호환성 검토(비호환 → 별도 마이그레이션 필요)와 리포지토리 레이어의 벤더종속 SQL 2종(둘 다 기동 중 실제로 재현/발견) 모두 해결. 사용자가 별도로 지시한 sched-planner의 PLAN.md 반영은 별도 작업(이 커밋에는 포함하지 않음).
 - 다음 작업: 없음(요청 사항 전부 완료, 사용자 확인 대기). 로컬 commit만 수행, push 없음.
+
+## 2026-11-16 — 버그 수정: AuthControllerTest가 호스트 AUTH_DISABLED 환경변수에 의존하던 테스트 격리 결함 (worker)
+- 사용자 직접 재현: 로컬 쉘에 `AUTH_DISABLED=true`를 export해둔 채 `mvn clean package`를 돌리면 이 값이 테스트 JVM에도 그대로 전달돼, `AuthControllerTest.garbageTokenIsUnauthorized`/`protectedEndpointWithoutTokenIsUnauthorized`가 (SecurityConfig가 `anyRequest().permitAll()`로 분기하면서) 401 대신 200을 받아 실패 — "기본값(인증 활성화)에서 보호가 정상 동작하는지"를 검증하는 테스트가 호스트 환경변수에 의해 결과가 바뀌는 테스트 격리 결함. 운영 기본값(`AUTH_DISABLED` 기본 `false`)과는 무관하지만 CI/다른 개발자 환경에서 동일하게 재발 가능한 실재 버그.
+- `AuthControllerTest`에 `@TestPropertySource(properties = "app.auth.disabled=false")` 추가 — 테스트 프로퍼티소스가 OS 환경변수보다 우선순위가 높아, 호스트 쉘의 `AUTH_DISABLED` 값과 무관하게 이 클래스는 항상 인증이 활성화된 상태로 고정 실행됨(이 때문에 기존에 공유하던 `AbstractRepositoryIntegrationTest` 기반 컨텍스트와는 별도의 전용 Spring 컨텍스트가 하나 더 뜸 — `AuthDisabledIntegrationTest`가 반대 방향으로 이미 쓰고 있던 것과 같은 패턴).
+- grep으로 동일 결함(호스트 `AUTH_DISABLED` 값에 의존하는 다른 테스트) 전체 점검: `isUnauthorized()` 단언을 쓰는 테스트 클래스는 `AuthControllerTest` 하나뿐이었고, 그 안의 `loginWithWrongPasswordIsUnauthorized`/`changePasswordWithWrongCurrentPasswordIsUnauthorized`는 `AuthController`의 자격증명 검증 로직(SecurityConfig의 인증 게이트와 무관)이라 애초에 영향 없음 — 실질적으로 취약했던 건 `garbageTokenIsUnauthorized`/`protectedEndpointWithoutTokenIsUnauthorized` 2개였고 둘 다 클래스 레벨 수정으로 함께 해결됨. `AuthDisabledIntegrationTest`는 의도적으로 `AUTH_DISABLED=true`를 거는 테스트라 그대로 둠.
+- 재현 검증(사용자가 요구한 정확한 조건으로 실제 실행): PowerShell에서 `$env:AUTH_DISABLED='true'`를 설정한 세션에서 `mvn test` 실행 → `AuthControllerTest` surefire 리포트 `Tests run: 7, Failures: 0, Errors: 0` 확인, 전체 100개 테스트도 같은 세션에서 `Total tests=100 failures=0 errors=0` 확인. 이어서 `AUTH_DISABLED`를 unset한 세션에서도 전체 100개 재확인 — 둘 다 그린.
+- DoD 점검: `mvn test` 전체 그린(`AUTH_DISABLED` 설정된 채로도 100/100, 설정 안 된 채로도 100/100). `mvn clean package` 재확인 성공.
+- 다음 작업: 없음(요청 사항 전부 완료, 사용자 확인 대기). 로컬 commit만 수행, push 없음.

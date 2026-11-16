@@ -21,6 +21,7 @@
 | `INITIAL_ADMIN_PASSWORD` | (최초 기동 시) 시드할 관리자 비밀번호 |
 | `CORS_ALLOWED_ORIGIN` | 프론트엔드(React SPA) 배포 오리진, 쉼표로 복수 허용. 로컬 기본값 `http://localhost:5173` |
 | `SERVER_PORT` | (선택) 기본 8080 |
+| `AUTH_DISABLED` | **로컬 개발 전용, 운영 환경에서는 절대 설정하지 말 것.** `true`로 설정하면 모든 `/api/**`가 토큰 없이 호출 가능해진다(로그인 생략). 기본값 `false`(미설정 시 평소처럼 인증 필요) — 켜져 있으면 기동 로그에 WARN이 찍힌다 |
 
 위 값들은 모두 `backend/src/main/resources/application.yml`에서 `${VAR}` 형태로만 참조되며, 소스에 실제 값은 들어있지 않다.
 

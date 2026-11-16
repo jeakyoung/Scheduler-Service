@@ -54,6 +54,10 @@ app:
     # Comma-separated list of allowed frontend origins (React SPA dev server / deployed domain).
     # e.g. http://localhost:5173,https://scheduler.example.com
     allowed-origin: ${CORS_ALLOWED_ORIGIN:http://localhost:5173}
+  auth:
+    # LOCAL DEV ONLY - NEVER set this in production. When true, every /api/** endpoint is
+    # open with no token required at all. Defaults to false (the secure, normal behavior).
+    disabled: ${AUTH_DISABLED:false}
 
 logging:
   level:

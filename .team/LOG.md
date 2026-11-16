@@ -283,3 +283,12 @@
 - sched-planner가 N2(PLAN.md §4.1/§8에 Quartz cron day-of-month/day-of-week `?` 규칙 명시) 완료 → orchestrator가 해당 문서 변경 커밋(`c4479aa`, `.team` 문서 전용 변경이라 orchestrator가 직접 커밋).
 - 최종 상태: `mvn test` 97/97 그린, working tree clean, `main` 브랜치가 `origin/main` 대비 **22개 커밋 앞섬(미push)**. REVIEW.md가 지적한 Blocking 0 / Major 2(수정완료) / Minor 3(N1·N3 수정완료, N2 문서보강완료) 전부 해소됨.
 - 오케스트레이션 절차(researcher→planner→worker→reviewer, 중간 3회 사용자 직접 교정 반영) 1회 루프 종료. push 여부/추가 리뷰 라운드는 사용자 판단 대기.
+
+## 2026-11-16 — AUTH_DISABLED 로컬 개발용 인증 우회 토글 추가 (worker)
+- 사용자 직접 요청: 로컬 테스트 편의를 위해 "로그인 건너뛰기"를 opt-in 환경변수로 추가, 운영 기본값(인증 필요)은 그대로 유지.
+- `application.yml`: `app.auth.disabled: ${AUTH_DISABLED:false}` 추가(미설정 시 기존과 동일하게 `false`).
+- `security/SecurityConfig`: `securityFilterChain` 빈이 `@Value("${app.auth.disabled}") boolean authDisabled`를 주입받아 분기 — `true`면 `anyRequest().permitAll()` + `JwtAuthenticationFilter` 자체를 필터체인에 추가하지 않음(요청마다 토큰 파싱 자체를 스킵), `false`(기본)면 기존 동작(`/api/auth/login`·`/api/health`만 열림, 나머지 인증 필요 + JWT 필터 적용) 그대로. `authDisabled==true`일 때 기동 시 SLF4J `WARN`으로 "경고: 인증이 비활성화되어 있습니다(AUTH_DISABLED=true). 로컬 개발 전용 설정입니다 - 운영 환경에서는 절대 사용하지 마세요." 로그 출력(운영에서 실수로 켜졌을 때 로그에서 바로 눈에 띄도록).
+- README에 `AUTH_DISABLED` 환경변수 행 추가, "로컬 개발 전용, 운영 환경에서는 절대 설정하지 말 것"을 굵게 명시.
+- 테스트: `security/AuthDisabledIntegrationTest`(신규, `@DynamicPropertySource`로 `AUTH_DISABLED=true`를 주입하는 **별도** Spring 컨텍스트 — 기존 `AbstractRepositoryIntegrationTest` 상속분(DB_URL 등)에 이 프로퍼티만 추가) — 토큰 없이 `GET /api/schedules` 호출 시 200 확인. 기본값(미설정, `false`)일 때 여전히 401인 것은 기존 `AuthControllerTest.protectedEndpointWithoutTokenIsUnauthorized`가 이미 커버하고 있어 별도 테스트 추가 없이 재사용(해당 테스트는 `AUTH_DISABLED`를 설정하지 않는 기존 컨텍스트를 그대로 쓰므로 이번 변경으로 인한 영향 없음을 전체 테스트 그린으로 확인).
+- DoD 점검: `mvn test` 전체 98개 테스트 그린(기존 97 + 신규 1, 기본값 케이스는 기존 테스트가 계속 통과하는 것으로 확인). `mvn clean package` 재확인 성공.
+- 다음 작업: 없음(요청 사항 전부 완료, 사용자 확인 대기).

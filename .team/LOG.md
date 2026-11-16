@@ -198,3 +198,10 @@
 - worker가 T11(인증) 착수 전 "React SPA가 백엔드와 다른 오리진인데 세션 쿠키 vs 토큰 인증 중 뭘 쓸지" 결정이 필요하다며 스스로 멈춤(정당한 아키텍처 결정 포인트).
 - orchestrator가 결정: **토큰(JWT) 기반, stateless**로 확정 — 세션 쿠키 방식은 SameSite/CORS Allow-Credentials/CSRF 방어까지 다 챙겨야 해서 단일 관리자 역할의 내부 어드민 도구 규모에 비해 과함. 로그인 시 JWT 발급 → 프론트가 Authorization: Bearer 헤더로 호출, Spring Security는 세션 미사용(stateless).
 - sched-worker에게 이 결정과 함께 T8(스케줄 CRUD API)~T14(테스트 정리)까지 계속 진행 지시함. 다음 단계: 완료/추가 결정포인트 대기.
+
+## 2026-11-16 — 월 사용량 한도로 중단 후 재개: 비밀번호 변경 기능 마무리 (worker)
+- 지난 세션이 사용량 한도로 중단될 때 커밋되지 않은 변경이 남아있었음: `AdminUserRepository`/`JdbcAdminUserRepository`에 `updatePasswordHash(username, newHash)` 추가, `web/api/dto/ChangePasswordRequest` 신규, `AuthController`에 `PUT /api/auth/password` 추가. 이건 T11 작업 중 발견한 PLAN.md 간극을 메우는 작업이었음 — PLAN §7(화면 목록) 8번이 "비밀번호 변경(본인 계정)" 화면을 요구하는데 PLAN §6(API 목록)에는 대응하는 엔드포인트가 전혀 없었음. §0(단일 ADMIN 역할, 최소 계정관리)과 §7 화면목록에 이미 명시된 범위라 사용자 확인 없이 자연스러운 보강으로 판단, 추가함.
+- 재개 후 가장 먼저 한 일: `AuthControllerTest`에 누락됐던 테스트 2개 추가(`changePasswordWithWrongCurrentPasswordIsUnauthorized`: 현재 비밀번호 틀리면 401, `changePasswordThenLoginWithNewPasswordSucceeds`: 변경 후 기존 비밀번호로는 로그인 실패·새 비밀번호로는 성공) — 로그인 공용 헬퍼 `login(username,password)`로 중복 제거.
+- Docker Desktop이 세션 재개 시점에 꺼져있어 재기동 후(이전 세션과 동일한 절차) 테스트 진행.
+- DoD 점검: `mvn test` 전체 78개 테스트 그린(기존 76개 + 비밀번호 변경 신규 2개). `mvn clean package` 재확인 성공.
+- 다음 작업: T12 (React SPA 실제 화면 구현)부터 TASKS.md 순서대로 계속.

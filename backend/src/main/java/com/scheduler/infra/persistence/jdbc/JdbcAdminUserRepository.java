@@ -59,6 +59,16 @@ public class JdbcAdminUserRepository implements AdminUserRepository {
     }
 
     @Override
+    public void updatePasswordHash(String username, String newPasswordHash) {
+        jdbc.update(
+                "UPDATE admin_user SET password_hash = :passwordHash WHERE username = :username",
+                new MapSqlParameterSource()
+                        .addValue("passwordHash", newPasswordHash)
+                        .addValue("username", username)
+        );
+    }
+
+    @Override
     public boolean existsAny() {
         Integer count = jdbc.queryForObject("SELECT COUNT(*) FROM admin_user", new MapSqlParameterSource(), Integer.class);
         return count != null && count > 0;

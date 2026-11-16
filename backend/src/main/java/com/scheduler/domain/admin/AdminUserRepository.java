@@ -11,5 +11,7 @@ public interface AdminUserRepository {
 
     AdminUser save(AdminUser adminUser);
 
+    void updatePasswordHash(String username, String newPasswordHash);
+
     boolean existsAny();
 }

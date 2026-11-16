@@ -16,6 +16,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -95,5 +96,56 @@ class AuthControllerTest extends AbstractRepositoryIntegrationTest {
     void garbageTokenIsUnauthorized() throws Exception {
         mockMvc.perform(get("/api/schedules").header("Authorization", "Bearer not-a-real-token"))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void changePasswordWithWrongCurrentPasswordIsUnauthorized() throws Exception {
+        String token = login(username, "correct-password");
+
+        mockMvc.perform(put("/api/auth/password")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"wrong-current-password","newPassword":"brand-new-password"}
+                                """))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void changePasswordThenLoginWithNewPasswordSucceeds() throws Exception {
+        String token = login(username, "correct-password");
+
+        mockMvc.perform(put("/api/auth/password")
+                        .header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"currentPassword":"correct-password","newPassword":"brand-new-password"}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"correct-password"}
+                                """.formatted(username)))
+                .andExpect(status().isUnauthorized());
+
+        mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"brand-new-password"}
+                                """.formatted(username)))
+                .andExpect(status().isOk());
+    }
+
+    private String login(String username, String password) throws Exception {
+        String response = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"username":"%s","password":"%s"}
+                                """.formatted(username, password)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(response).get("token").asText();
     }
 }

@@ -80,11 +80,12 @@ public class JdbcCredentialRepository implements CredentialRepository {
                 .addValue("name", credential.name())
                 .addValue("encryptedValue", cipher.encrypt(credential.value()))
                 .addValue("description", credential.description())
-                .addValue("updatedBy", credential.updatedBy());
+                .addValue("updatedBy", credential.updatedBy())
+                .addValue("updatedAt", Timestamp.from(Instant.now()));
 
         jdbc.update(
                 "UPDATE credential SET name = :name, encrypted_value = :encryptedValue, description = :description, " +
-                        "updated_by = :updatedBy, updated_at = SYSUTCDATETIME() WHERE id = :id",
+                        "updated_by = :updatedBy, updated_at = :updatedAt WHERE id = :id",
                 params
         );
         return findById(credential.id()).orElseThrow();

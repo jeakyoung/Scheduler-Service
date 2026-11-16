@@ -3,33 +3,32 @@ spring:
     name: scheduler-service
 
   datasource:
-    url: ${DB_URL}
-    username: ${DB_USERNAME}
-    password: ${DB_PASSWORD}
-    driver-class-name: com.microsoft.sqlserver.jdbc.SQLServerDriver
+    # LOCAL DEV ONLY fallback: if DB_URL is unset, boot against a local H2 file DB instead
+    # of requiring a real SQL Server instance (Docker etc.) just to start the app. This
+    # ONLY affects the engine's own meta DB (schedule_definition/target_db_config/
+    # credential/admin_user + Quartz QRTZ_* tables) - the target business DB that
+    # StoredProcedureInvoker calls into (target_db_config.jdbc_url) is completely unrelated
+    # and is never H2; it's whatever real SQL Server an admin configures through the UI.
+    # Always set DB_URL explicitly in any real deployment.
+    url: ${DB_URL:jdbc:h2:file:./data/scheduler-meta;DATABASE_TO_LOWER=FALSE}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+    # driver-class-name intentionally omitted - Spring Boot detects the right JDBC driver
+    # from the URL scheme (jdbc:h2: vs jdbc:sqlserver:) via DatabaseDriver.fromJdbcUrl().
 
   flyway:
     enabled: true
-    locations: classpath:db/migration
+    # {vendor} resolves to "h2" or "sqlserver" (Spring Boot's DatabaseDriver id) based on
+    # the active datasource URL - see db/migration/h2 vs db/migration/sqlserver. H2 needs
+    # genuinely different DDL (IDENTITY generation, no NVARCHAR(MAX)/DATETIME2/T-SQL syntax,
+    # no "GO" batch separators), not just a dialect tweak, so it gets its own migration set
+    # rather than one script trying to parse under both engines.
+    locations: classpath:db/migration/{vendor}
 
   quartz:
     job-store-type: jdbc
     jdbc:
-      initialize-schema: never # schema is created by Flyway (V2__quartz_tables.sql), not by Spring Boot
-    properties:
-      org:
-        quartz:
-          jobStore:
-            class: org.springframework.scheduling.quartz.LocalDataSourceJobStore
-            # MSSQLDelegate (not the generic StdJDBCDelegate) - the official Quartz SQL
-            # Server DDL script (V2__quartz_tables.sql) itself calls this out: SQL Server
-            # doesn't support ANSI "SELECT ... FOR UPDATE" row locking, which StdJDBCDelegate
-            # relies on and MSSQLDelegate works around.
-            driverDelegateClass: org.quartz.impl.jdbcjobstore.MSSQLDelegate
-            tablePrefix: QRTZ_
-            isClustered: false
-          scheduler:
-            instanceName: SchedulerServiceQuartz
+      initialize-schema: never # schema is created by Flyway, not by Spring Boot
 
 server:
   port: ${SERVER_PORT:8080}

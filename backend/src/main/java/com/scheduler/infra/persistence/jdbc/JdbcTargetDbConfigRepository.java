@@ -79,11 +79,12 @@ public class JdbcTargetDbConfigRepository implements TargetDbConfigRepository {
                 .addValue("name", config.name())
                 .addValue("jdbcUrl", config.jdbcUrl())
                 .addValue("username", config.username())
-                .addValue("encryptedPassword", cipher.encrypt(config.password()));
+                .addValue("encryptedPassword", cipher.encrypt(config.password()))
+                .addValue("updatedAt", Timestamp.from(Instant.now()));
 
         jdbc.update(
                 "UPDATE target_db_config SET name = :name, jdbc_url = :jdbcUrl, username = :username, " +
-                        "encrypted_password = :encryptedPassword, updated_at = SYSUTCDATETIME() WHERE id = :id",
+                        "encrypted_password = :encryptedPassword, updated_at = :updatedAt WHERE id = :id",
                 params
         );
         return findById(config.id()).orElseThrow();

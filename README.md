@@ -11,7 +11,7 @@
 
 | 환경변수 | 설명 |
 |---|---|
-| `DB_URL` | 메타DB(스케줄 정의/설정/Quartz 상태) JDBC URL. 예: `jdbc:sqlserver://localhost;databaseName=scheduler_meta;encrypt=false;trustServerCertificate=true;` |
+| `DB_URL` | 메타DB(스케줄 정의/설정/Quartz 상태) JDBC URL. 예: `jdbc:sqlserver://localhost;databaseName=scheduler_meta;encrypt=false;trustServerCertificate=true;` — **생략하면 로컬 개발용 H2 파일 DB(`./data/scheduler-meta`)로 자동 fallback**해서 Docker/SQL Server 없이 `mvn spring-boot:run`만으로 기동된다(기동 로그에 WARN 찍힘). 이 fallback은 메타DB에만 적용되고, `target_db_config`가 가리키는 대상 업무 DB(SP가 실제 존재하는 업체 DB)는 항상 실제 SQL Server이며 영향받지 않는다. **실제 배포 시에는 반드시 SQL Server `DB_URL`을 지정할 것** |
 | `DB_USERNAME` | 메타DB 접속 계정 |
 | `DB_PASSWORD` | 메타DB 접속 비밀번호 |
 | `MASTER_ENCRYPTION_KEY` | `target_db_config`/`credential` 암호화용 AES-256 마스터키 (base64). 예: `openssl rand -base64 32` |
@@ -71,7 +71,7 @@ React SPA가 백엔드와 다른 오리진이라, 세션 쿠키 방식 대신 **
 
 ### 백엔드 (`backend/`) — 재빌드한 jar/이미지를 그대로 재사용
 
-- [ ] `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` — 그 업체의 메타DB(신규 스키마, Flyway가 기동 시 자동 적용)
+- [ ] `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` — 그 업체의 메타DB(신규 스키마, Flyway가 기동 시 자동 적용). **`DB_URL`을 반드시 지정** — 생략하면 로컬 개발용 H2로 fallback되므로 실제 배포에서는 절대 비워두지 말 것
 - [ ] `MASTER_ENCRYPTION_KEY` — 업체별로 **새로 생성**(`openssl rand -base64 32`). 다른 배포와 재사용하지 않음(이 키가 다르면 기존 암호문을 복호화 못 함 — 재배포 = 새 메타DB + 새 키이므로 문제 없음)
 - [ ] `JWT_SIGNING_KEY` — 업체별로 새로 생성, 마찬가지로 재사용하지 않음
 - [ ] `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD` — 그 업체의 최초 관리자 계정(최초 기동 1회만 사용됨)

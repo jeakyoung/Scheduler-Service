@@ -11,6 +11,10 @@ application-local.yml
 application-local.yaml
 .env
 
+# Local H2 file DB created by the DB_URL-unset fallback (backend/application.yml) when
+# running `mvn spring-boot:run` without a real SQL Server - local dev artifact only.
+backend/data/
+
 # Logs
 *.log
 

@@ -47,7 +47,11 @@ public class JdbcScheduleRepository implements ScheduleRepository {
 
     @Override
     public List<ScheduleDefinition> findAllEnabled() {
-        return jdbc.query("SELECT * FROM schedule_definition WHERE enabled = 1 ORDER BY id", ROW_MAPPER);
+        return jdbc.query(
+                "SELECT * FROM schedule_definition WHERE enabled = :enabled ORDER BY id",
+                new MapSqlParameterSource("enabled", true),
+                ROW_MAPPER
+        );
     }
 
     @Override
@@ -76,13 +80,15 @@ public class JdbcScheduleRepository implements ScheduleRepository {
 
     @Override
     public ScheduleDefinition update(ScheduleDefinition schedule) {
-        MapSqlParameterSource params = toParams(schedule).addValue("id", schedule.id());
+        MapSqlParameterSource params = toParams(schedule)
+                .addValue("id", schedule.id())
+                .addValue("updatedAt", Timestamp.from(Instant.now()));
 
         jdbc.update(
                 "UPDATE schedule_definition SET name = :name, enabled = :enabled, cron_expression = :cronExpression, " +
                         "timezone = :timezone, sp_name = :spName, target_db_config_id = :targetDbConfigId, " +
                         "action_type = :actionType, action_config = :actionConfig, description = :description, " +
-                        "updated_by = :updatedBy, updated_at = SYSUTCDATETIME() WHERE id = :id",
+                        "updated_by = :updatedBy, updated_at = :updatedAt WHERE id = :id",
                 params
         );
         return findById(schedule.id()).orElseThrow();
@@ -98,10 +104,11 @@ public class JdbcScheduleRepository implements ScheduleRepository {
         MapSqlParameterSource params = new MapSqlParameterSource()
                 .addValue("id", id)
                 .addValue("enabled", enabled)
-                .addValue("updatedBy", updatedBy);
+                .addValue("updatedBy", updatedBy)
+                .addValue("updatedAt", Timestamp.from(Instant.now()));
 
         jdbc.update(
-                "UPDATE schedule_definition SET enabled = :enabled, updated_by = :updatedBy, updated_at = SYSUTCDATETIME() WHERE id = :id",
+                "UPDATE schedule_definition SET enabled = :enabled, updated_by = :updatedBy, updated_at = :updatedAt WHERE id = :id",
                 params
         );
     }

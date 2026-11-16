@@ -185,6 +185,8 @@ interface ExecutionResultSink {
 > **실행이력 테이블은 이번 라운드에 스키마를 만들지 않는다 (TBD).** 설계 시점에 §3의 `ExecutionResult`/감시-서버 원칙(교정사항 #6: 상태/요약만, 전체 결과행 보존 금지)을 따를 것.
 >
 > **적용 범위 명확화**: 아래 §4.1~4.6의 Flyway 마이그레이션은 **엔진 자신의 메타DB(스케줄 정의/설정/Quartz 상태 저장용)에만** 적용된다. `target_db_config`가 가리키는 **대상 업무 DB(SP가 실제로 존재하는 업체 DB)에는 Flyway가 전혀 적용되지 않는다** — 엔진은 그 DB에 대해 스키마 변경 권한도, DDL 실행 기능도 갖지 않는다(§9 참고).
+>
+> **로컬 개발용 H2 fallback (2026-11-16 교정, 사용자 직접 확정)**: 백엔드 기동 시 `DB_URL` 환경변수가 설정되지 않으면 **메타DB를 H2(파일 기반 임베디드 DB)로 자동 fallback**해 `mvn spring-boot:run`만으로 로컬 기동이 가능하게 한다. **이 fallback은 메타DB(§4.1~4.6)에만 적용되고 로컬 개발 전용이다** — `target_db_config`가 가리키는 대상 업무 DB는 이 변경과 무관하게 항상 MSSQL 고정(§1)이며, 운영 환경은 지금처럼 `DB_URL`에 SQL Server를 지정해서 쓴다. Flyway 마이그레이션과 Quartz JDBC JobStore가 현재 SQL Server 전용 DDL(T-SQL, Quartz `tables_sqlServer.sql`)을 쓰고 있으므로, H2에서 기동하려면 H2용 마이그레이션/Quartz delegate를 별도로 구성해야 한다(구체적 구현 방식은 구현 시점에 결정).
 
 ### 4.1 `schedule_definition` — 스케줄(Job) 정의
 

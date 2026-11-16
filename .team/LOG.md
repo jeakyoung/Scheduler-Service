@@ -227,3 +227,14 @@
 - README에 "다른 업체 재배포" 체크리스트를 실제 체크박스 목록으로 추가(기존엔 "T13에서 보강" 문구만 있었음) — 백엔드(환경변수 7개 + 관리자 웹에서 입력할 운영비밀값 2종) / 프론트엔드(`VITE_API_BASE_URL`은 **빌드 시점**에 정적 주입되므로 업체별로 `npm run build` 재실행 필요하다는 점 명시, 소스 변경은 없음) 양쪽 다룸 + 검증 결과 요약 문단.
 - DoD 점검: `mvn clean package`/`npm run build` 둘 다 최종 재확인 성공. grep 기반 비밀값 검색 0건. README 체크리스트 존재(백엔드/프론트 둘 다).
 - 다음 작업: T14 (테스트 정리 + 회귀 확인, 레거시 3패턴 재현 시나리오 테스트).
+
+## 2026-11-16 — T14 테스트 정리 + 회귀 확인 (worker) — TASKS.md T1~T14 전체 완료
+- `scenario/LegacyPatternScenarioTest` 신규 작성 — 레거시 3개 하드코딩 Task를 신규 스케줄 정의 데이터로 재현(모두 `schedule_parameter` 0건 — 레거시도 파라미터 없는 EXEC였음을 그대로 반영):
+  1. **DaySchedulerTask 재현**(`weeklyMondayGroupedByTitle_noParameters`): cron `"0 0 9 ? * MON"`(매주 월요일 9시), `action_type=API_CALL`+`groupingMode=GROUP_BY`(`groupByField=EA_TITLE`) — SP가 타이틀 A 2행+타이틀 B 1행을 반환하면 **3행이 아니라 2번**(그룹당 1회) HTTP 호출되는 것을 확인(레거시의 "문서 타이틀별 그룹 발송" 의도 재현). 레거시가 Java 코드로 직접 만든 `empList` 전체 배열 집계는 일반화된 플레이스홀더 치환(그룹의 첫 행만 사용, PLAN §5 규칙)으로 단순화됐음을 테스트 주석에 명시 — byte-for-byte 재현이 아니라 실행 흐름(그룹별 1회 발송)의 재현임을 분명히 함.
+  2. **HourSchedulerTask 재현**(`weekdayEveryThirtyMinutesPerRow_noParameters`): cron `"0 0/30 * ? * MON-FRI"`(평일 30분마다 — 레거시의 `DayOfWeek.SATURDAY/SUNDAY` 런타임 체크가 cron의 `MON-FRI` 필드로 완전히 흡수됐음을 보여줌, PLAN §8 매핑표 그대로), `groupingMode=PER_ROW` — 2행 → 2번 개별 호출(행마다 1회, 레거시의 "직원별 개별 발송" 재현), payload 유사 구조(`eaExeId`/`exeSeq`) 포함.
+  3. **PurchaseReqSchedulerTask 재현**(`weekdayDailyAt0830PerRow_noParameters`): cron `"0 30 8 ? * MON-FRI"`(평일 오전 8시30분), 역시 `PER_ROW` 개별발송 — Hour패턴과 같은 모양(평일+PER_ROW)이지만 다른 SP명/시각으로 "같은 범용 구조가 서로 다른 레거시 2개 패턴을 모두 커버한다"는 것도 같이 보여줌.
+  - 세 테스트 모두 `CronExpression.isValidExpression(...)`으로 cron 자체의 유효성도 같이 검증(T7에서 발견한 day-of-month `?` 규칙 포함), 실제 로컬 JDK `HttpServer`로 호출 횟수/바디 내용을 직접 확인(모킹이 아니라 실제 HTTP 요청 수신 확인).
+- `mvn test` 전체 실행해 T1~T13까지 쌓인 모든 테스트(78개) + 신규 3개 = **81개 전체 그린** 1회 확인.
+- `mvn clean package` 최종 재확인 성공. 컨테이너 정리 완료.
+- **DoD 점검**: `mvn test` 전체 그린(81/81). 레거시 3패턴 각각에 대응하는 시나리오 테스트 3개 존재 및 통과 — 둘 다 충족.
+- **TASKS.md T1~T14 전체 완료**(T15는 future, 범위 밖으로 명시돼 있어 착수하지 않음). 최종 상태: 백엔드(Spring Boot, REST API 전용, Quartz 동적 스케줄링, AES-256-GCM 비밀값 암호화, JWT stateless 인증) + 프론트엔드(React SPA, 8개 화면 전부 구현, 백엔드와 독립 배포) 전부 동작 확인, 비밀값 리터럴 0건, README에 재배포 체크리스트 존재. 다음 단계는 사용자 지시 대기(예: 실제 배포, 코드리뷰, 또는 T15 착수 여부 확인).

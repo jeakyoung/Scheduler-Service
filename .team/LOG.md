@@ -218,3 +218,12 @@
 - DoD 점검: 빌드/타입체크 성공, 전체 플로우가 실제 API 레벨에서 재컴파일 없이 동작함을 확인. **다만 "브라우저 조작 스크린샷"이라는 DoD 문구 자체는 이 환경의 한계로 문자 그대로 충족하지 못했음을 투명하게 기록** — 필요 시 사용자가 로컬에서 `npm run dev`로 직접 띄워 육안 확인하는 것을 권장.
 - 검증 후 정리: 백엔드/프론트 프로세스 종료, 검증용 SQL Server 컨테이너 삭제.
 - 다음 작업: T13 (설정/비밀값 최종 점검).
+
+## 2026-11-16 — T13 설정/비밀값 최종 점검 (worker)
+- `backend/src/main/resources/application.yml` 재확인: `DB_URL`/`DB_USERNAME`/`DB_PASSWORD`/`MASTER_ENCRYPTION_KEY`/`JWT_SIGNING_KEY`/`INITIAL_ADMIN_*`/`app.cors.allowed-origin` 전부 `${VAR}` 형태만 존재(일부는 `:기본값` 형태지만 그 기본값도 `http://localhost:5173`/`8080`/`720` 같은 로컬 개발 상수일 뿐 비밀값 아님).
+- `frontend/.env.example`은 `VITE_API_BASE_URL=http://localhost:8080` 로컬 기본값만 포함, 실값은 `.env.local`에만 — `git check-ignore -v`로 gitignore 적용 확인 + `git ls-files`로 `.env.local`이 git에 추적된 적 없음(히스토리 포함) 확인.
+- **레포 전체 grep으로 비밀값 리터럴 0건 확인**(DoD 명시 요구사항): (1) 레거시 `Config.java`의 실제 운영값(`218.38.64.229`, `192.168.80.27`, `erpUser`/`erpPasswd`, `f1s-fcm-9f3k2m8x4v1w7q5n`, `iPlusERP` 관련 URL) — `.team/PLAN.md`/`RESEARCH.md`에 "iPlusERP" 같은 **일반명사 레이블**(실제 비밀값 아님)만 남아있고 운영 IP/계정/API키는 전혀 없음을 재확인(2026-11-13에 이미 1차 검증됐던 것의 재확인), (2) `password\s*[:=]\s*"..."` 패턴의 리터럴 비밀번호 할당 — 테스트 픽스처 바깥에 0건(테스트 안의 "correct-password"/"pw" 같은 명백한 가짜값은 범위 밖), (3) AWS/OpenAI/Slack류 실제 키 접두사 패턴(`AKIA...`, `sk-...`, `xox...`) — 0건.
+- `backend/src/test` 전체의 `jdbc:sqlserver://` 리터럴을 재점검 — 전부 `example-business-db`/`unused`/Testcontainers 동적 URL 같은 가상값, 실제 호스트명 없음.
+- README에 "다른 업체 재배포" 체크리스트를 실제 체크박스 목록으로 추가(기존엔 "T13에서 보강" 문구만 있었음) — 백엔드(환경변수 7개 + 관리자 웹에서 입력할 운영비밀값 2종) / 프론트엔드(`VITE_API_BASE_URL`은 **빌드 시점**에 정적 주입되므로 업체별로 `npm run build` 재실행 필요하다는 점 명시, 소스 변경은 없음) 양쪽 다룸 + 검증 결과 요약 문단.
+- DoD 점검: `mvn clean package`/`npm run build` 둘 다 최종 재확인 성공. grep 기반 비밀값 검색 0건. README 체크리스트 존재(백엔드/프론트 둘 다).
+- 다음 작업: T14 (테스트 정리 + 회귀 확인, 레거시 3패턴 재현 시나리오 테스트).

@@ -139,6 +139,35 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
     }
 
     @Test
+    void failedRunNowDoesNotReturnStaleDisplayOutputFromPriorSuccess() throws Exception {
+        // REVIEW.md N3: DisplayOutputStore only ever holds the latest *successful* result
+        // and is never cleared on a later failure, so without the fix a failed run's
+        // response would still carry this earlier success's rows.
+        long id = createDisplayOnlySchedule("SP_TEST_SAMPLE");
+        mockMvc.perform(post("/api/schedules/" + id + "/run-now"))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.result.status").value("SUCCESS"));
+
+        jdbcTemplate.execute("DROP PROCEDURE SP_TEST_SAMPLE");
+
+        String response = mockMvc.perform(post("/api/schedules/" + id + "/run-now"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+
+        JsonNode node = objectMapper.readTree(response);
+        assertThat(node.at("/result/status").asText()).isEqualTo("FAILURE");
+        assertThat(node.get("displayOutput").isNull()).isTrue();
+
+        String lastResultResponse = mockMvc.perform(
+                        org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/schedules/" + id + "/last-result"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode lastResultNode = objectMapper.readTree(lastResultResponse);
+        assertThat(lastResultNode.at("/result/status").asText()).isEqualTo("FAILURE");
+        assertThat(lastResultNode.get("displayOutput").isNull()).isTrue();
+    }
+
+    @Test
     void concurrentRunNowIsRejectedWithConflict() throws Exception {
         long id = createDisplayOnlySchedule("SP_TEST_SLOW");
 

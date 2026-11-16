@@ -1,8 +1,10 @@
 package com.scheduler.web.api;
 
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.engine.execution.DisplayOutput;
 import com.scheduler.engine.execution.DisplayOutputStore;
 import com.scheduler.engine.execution.ExecutionResult;
+import com.scheduler.engine.execution.ExecutionStatus;
 import com.scheduler.engine.execution.LastExecutionResultStore;
 import com.scheduler.engine.execution.ScheduleExecutor;
 import com.scheduler.engine.execution.ScheduleNotFoundException;
@@ -49,15 +51,28 @@ public class ScheduleExecutionController {
     public RunResultResponse runNow(@PathVariable long id) {
         requireSchedule(id);
         ExecutionResult result = scheduleExecutor.execute(id, TriggerType.MANUAL);
-        return new RunResultResponse(result, displayOutputStore.get(id).orElse(null));
+        return new RunResultResponse(result, displayOutputFor(id, result));
     }
 
     @GetMapping("/api/schedules/{id}/last-result")
     public ResponseEntity<RunResultResponse> lastResult(@PathVariable long id) {
         requireSchedule(id);
         return lastExecutionResultStore.get(id)
-                .map(result -> ResponseEntity.ok(new RunResultResponse(result, displayOutputStore.get(id).orElse(null))))
+                .map(result -> ResponseEntity.ok(new RunResultResponse(result, displayOutputFor(id, result))))
                 .orElseGet(() -> ResponseEntity.noContent().build());
+    }
+
+    /**
+     * DisplayOutputStore only ever holds the latest *successful* DISPLAY_ONLY run - it is
+     * never cleared on a later failure. Without this check, run-now/last-result for a
+     * schedule whose current execution failed would still attach a stale displayOutput from
+     * some earlier successful run (REVIEW.md N3), which looks like "this failure's data".
+     */
+    private DisplayOutput displayOutputFor(long id, ExecutionResult result) {
+        if (result.status() != ExecutionStatus.SUCCESS) {
+            return null;
+        }
+        return displayOutputStore.get(id).orElse(null);
     }
 
     @GetMapping("/api/schedules/{id}/status")

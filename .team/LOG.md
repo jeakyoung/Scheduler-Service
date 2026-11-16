@@ -272,3 +272,9 @@
 - 테스트: `BodyTemplateRendererTest`에 4개 추가(`"`/`\` 포함 값이 주입 없이 올바른 JSON 문자열로 남는지 `JsonNode`로 재파싱해 검증, 개행 포함 값, 자격증명 치환값도 이스케이프되는지, 기존 `render()`(헤더용)는 여전히 무이스케이프임을 재확인) + `ScheduleExecutorTest.apiCallBodyWithSpecialCharactersInColumnValueStaysValidJson`(SP 컬럼값에 `"`/`:` 포함 — REVIEW.md 재현 페이로드 그대로 — 실제 HTTP 바디를 JSON으로 재파싱해 필드가 주입되지 않고 원래 값 그대로 복원됨을 확인).
 - DoD 점검: `mvn test` 전체 96개 테스트 그린(기존 91 + 신규 5). `mvn clean package` 재확인 성공.
 - 다음 작업: N3(`run-now`/`last-result`의 실패 시 과거 `DisplayOutput` 노출 — 가능하면 같이 수정).
+
+## 2026-11-16 — REVIEW.md N3 수정: run-now/last-result의 실패 시 과거 DisplayOutput 노출 방지 (worker)
+- `web/api/ScheduleExecutionController`: `displayOutputFor(id, result)` 헬퍼 추가 — `ExecutionResult.status()`가 `SUCCESS`가 아니면 무조건 `null` 반환, `SUCCESS`일 때만 `displayOutputStore.get(id)` 조회. `runNow`/`lastResult` 둘 다 이 헬퍼를 거치도록 교체(`DisplayOutputStore`는 성공한 `DISPLAY_ONLY` 실행에서만 갱신되고 실패 시 지워지지 않으므로, 상태 체크 없이 그냥 조회하면 "이번 실행"이 아니라 "과거 성공 실행"의 결과가 실패 응답에 섞여 나갈 수 있었음).
+- 테스트: `ScheduleExecutionControllerTest.failedRunNowDoesNotReturnStaleDisplayOutputFromPriorSuccess` — ① `SP_TEST_SAMPLE`로 run-now 성공(스토어에 결과 적재) → ② 같은 프로시저를 `DROP`해서 그 다음 run-now가 SP 호출 단계에서 실제로 실패하게 만듦(목업 없이 실제 DB 상태 변화로 실패 유도) → ③ 응답의 `result.status=="FAILURE"`이면서 `displayOutput`이 `null`임을 확인, `GET last-result`도 동일하게 `null` 확인(REVIEW.md가 지적한 "run-now/last-result 둘 다" 범위 그대로).
+- DoD 점검: `mvn test` 전체 97개 테스트 그린(기존 96 + 신규 1). `mvn clean package` 재확인 성공.
+- **REVIEW.md M1/M2/N1/N3 전부 수정 완료**(N2는 문서 보강 사안으로 sched-planner 몫, worker 범위 아님). 각 이슈를 별도 커밋으로 분리: M1(`02fee04`), M2(`9298c10`), N1(`e113b68`), N3(커밋 예정).

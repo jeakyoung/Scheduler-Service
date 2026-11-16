@@ -1,13 +1,11 @@
 package com.scheduler.infra.persistence.jdbc;
 
-import com.scheduler.domain.config.TargetDbConfig;
 import com.scheduler.domain.schedule.ActionConfigJson;
 import com.scheduler.domain.schedule.ActionType;
 import com.scheduler.domain.schedule.ApiCallActionConfig;
 import com.scheduler.domain.schedule.DisplayOnlyActionConfig;
 import com.scheduler.domain.schedule.GroupingMode;
 import com.scheduler.domain.schedule.ScheduleDefinition;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
@@ -20,19 +18,6 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
 
     @Autowired
     private JdbcScheduleRepository repository;
-
-    @Autowired
-    private JdbcTargetDbConfigRepository targetDbConfigRepository;
-
-    private Long targetDbConfigId;
-
-    @BeforeEach
-    void seedTargetDbConfig() {
-        TargetDbConfig config = targetDbConfigRepository.save(new TargetDbConfig(
-                null, "Test Target DB", "jdbc:sqlserver://example-business-db;", "biz_user", "enc", null, null
-        ));
-        targetDbConfigId = config.id();
-    }
 
     @Test
     void savesAndReloadsApiCallScheduleWithJsonRoundTrip() {
@@ -52,7 +37,6 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
                 "0 0/30 * ? * MON-FRI",
                 "Asia/Seoul",
                 "SP_SAMPLE_NOTICE_LIST",
-                targetDbConfigId,
                 ActionType.API_CALL,
                 actionConfigJson,
                 "sample description",
@@ -64,7 +48,6 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
         assertThat(reloaded.enabled()).isTrue();
         assertThat(reloaded.cronExpression()).isEqualTo("0 0/30 * ? * MON-FRI");
         assertThat(reloaded.actionType()).isEqualTo(ActionType.API_CALL);
-        assertThat(reloaded.targetDbConfigId()).isEqualTo(targetDbConfigId);
 
         ApiCallActionConfig roundTripped = ActionConfigJson.readApiCall(reloaded.actionConfig());
         assertThat(roundTripped.method()).isEqualTo("POST");
@@ -87,7 +70,6 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
                 "0 30 8 ? * MON-FRI",
                 "Asia/Seoul",
                 "SP_SAMPLE_DISPLAY",
-                targetDbConfigId,
                 ActionType.DISPLAY_ONLY,
                 actionConfigJson,
                 null,
@@ -139,7 +121,6 @@ class JdbcScheduleRepositoryTest extends AbstractRepositoryIntegrationTest {
                 "0 0 9 ? * MON",
                 "Asia/Seoul",
                 "SP_SAMPLE",
-                targetDbConfigId,
                 ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig("TABLE", null)),
                 null,

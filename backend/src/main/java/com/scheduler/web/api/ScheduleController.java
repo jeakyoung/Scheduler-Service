@@ -7,6 +7,7 @@ import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleParameter;
 import com.scheduler.domain.schedule.ScheduleParameterRepository;
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
 import com.scheduler.engine.execution.ScheduleNotFoundException;
 import com.scheduler.engine.quartz.ScheduleRegistrar;
 import com.scheduler.engine.sp.SqlIdentifierValidator;
@@ -36,17 +37,20 @@ public class ScheduleController {
 
     private final ScheduleRepository scheduleRepository;
     private final ScheduleParameterRepository scheduleParameterRepository;
+    private final ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
     private final ScheduleRegistrar scheduleRegistrar;
     private final ObjectMapper objectMapper;
 
     public ScheduleController(
             ScheduleRepository scheduleRepository,
             ScheduleParameterRepository scheduleParameterRepository,
+            ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository,
             ScheduleRegistrar scheduleRegistrar,
             ObjectMapper objectMapper
     ) {
         this.scheduleRepository = scheduleRepository;
         this.scheduleParameterRepository = scheduleParameterRepository;
+        this.scheduleTargetDbConfigRepository = scheduleTargetDbConfigRepository;
         this.scheduleRegistrar = scheduleRegistrar;
         this.objectMapper = objectMapper;
     }
@@ -72,9 +76,10 @@ public class ScheduleController {
 
         ScheduleDefinition saved = scheduleRepository.save(new ScheduleDefinition(
                 null, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
-                request.spName(), request.targetDbConfigId(), request.actionType(), actionConfigJson,
+                request.spName(), request.actionType(), actionConfigJson,
                 request.description(), null, null, authentication.getName()
         ));
+        scheduleTargetDbConfigRepository.replaceForSchedule(saved.id(), request.targetDbConfigIds());
         scheduleRegistrar.register(saved);
         return toResponse(saved, List.of());
     }
@@ -89,9 +94,10 @@ public class ScheduleController {
 
         ScheduleDefinition updated = scheduleRepository.update(new ScheduleDefinition(
                 id, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
-                request.spName(), request.targetDbConfigId(), request.actionType(), actionConfigJson,
+                request.spName(), request.actionType(), actionConfigJson,
                 request.description(), null, null, authentication.getName()
         ));
+        scheduleTargetDbConfigRepository.replaceForSchedule(id, request.targetDbConfigIds());
         scheduleRegistrar.register(updated);
         return toResponse(updated, scheduleParameterRepository.findByScheduleId(id));
     }
@@ -147,9 +153,11 @@ public class ScheduleController {
                 .map(p -> new ScheduleParameterResponse(p.id(), p.paramOrder(), p.paramName(), p.dataType(), p.valueSource(), p.literalValue()))
                 .toList();
 
+        List<Long> targetDbConfigIds = scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(schedule.id());
+
         return new ScheduleResponse(
                 schedule.id(), schedule.name(), schedule.enabled(), schedule.cronExpression(), schedule.timezone(),
-                schedule.spName(), schedule.targetDbConfigId(), schedule.actionType(), actionConfigNode,
+                schedule.spName(), targetDbConfigIds, schedule.actionType(), actionConfigNode,
                 schedule.description(), schedule.createdAt(), schedule.updatedAt(), schedule.updatedBy(),
                 nextFireTime, parameterResponses
         );

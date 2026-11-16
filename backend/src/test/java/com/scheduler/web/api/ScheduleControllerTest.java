@@ -59,7 +59,7 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
                   "cronExpression": "%s",
                   "timezone": "Asia/Seoul",
                   "spName": "SP_SAMPLE_NOTICE_LIST",
-                  "targetDbConfigId": %d,
+                  "targetDbConfigIds": [%d],
                   "actionType": "API_CALL",
                   "actionConfig": {
                     "method": "POST",
@@ -96,7 +96,7 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
                   "cronExpression": "0 0 9 ? * MON",
                   "timezone": "Asia/Seoul",
                   "spName": "sp_test; DROP TABLE some_table; --",
-                  "targetDbConfigId": %d,
+                  "targetDbConfigIds": [%d],
                   "actionType": "DISPLAY_ONLY",
                   "actionConfig": {"displayFormat": "TABLE"}
                 }
@@ -115,7 +115,7 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
                   "cronExpression": "0 0 9 ? * MON",
                   "timezone": "Asia/Seoul",
                   "spName": "SP_SAMPLE",
-                  "targetDbConfigId": %d,
+                  "targetDbConfigIds": [%d],
                   "actionType": "API_CALL",
                   "actionConfig": {"method": "POST", "groupingMode": "PER_ROW"}
                 }

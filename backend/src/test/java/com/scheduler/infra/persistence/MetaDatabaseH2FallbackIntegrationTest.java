@@ -87,7 +87,7 @@ class MetaDatabaseH2FallbackIntegrationTest {
                                   "cronExpression": "0 0 9 ? * MON",
                                   "timezone": "Asia/Seoul",
                                   "spName": "SP_SAMPLE",
-                                  "targetDbConfigId": %d,
+                                  "targetDbConfigIds": [%d],
                                   "actionType": "DISPLAY_ONLY",
                                   "actionConfig": {"displayFormat": "TABLE"}
                                 }

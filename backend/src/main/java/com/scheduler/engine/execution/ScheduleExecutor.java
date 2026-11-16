@@ -7,6 +7,7 @@ import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleParameter;
 import com.scheduler.domain.schedule.ScheduleParameterRepository;
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
 import com.scheduler.engine.action.ActionHandler;
 import com.scheduler.engine.action.ActionOutcome;
 import com.scheduler.engine.sp.SpParameterResolver;
@@ -32,6 +33,7 @@ public class ScheduleExecutor {
 
     private final ScheduleRepository scheduleRepository;
     private final ScheduleParameterRepository scheduleParameterRepository;
+    private final ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
     private final TargetDbConfigRepository targetDbConfigRepository;
     private final StoredProcedureInvoker storedProcedureInvoker;
     private final Map<ActionType, ActionHandler> actionHandlersByType;
@@ -44,6 +46,7 @@ public class ScheduleExecutor {
     public ScheduleExecutor(
             ScheduleRepository scheduleRepository,
             ScheduleParameterRepository scheduleParameterRepository,
+            ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository,
             TargetDbConfigRepository targetDbConfigRepository,
             StoredProcedureInvoker storedProcedureInvoker,
             Map<ActionType, ActionHandler> actionHandlersByType,
@@ -53,6 +56,7 @@ public class ScheduleExecutor {
     ) {
         this.scheduleRepository = scheduleRepository;
         this.scheduleParameterRepository = scheduleParameterRepository;
+        this.scheduleTargetDbConfigRepository = scheduleTargetDbConfigRepository;
         this.targetDbConfigRepository = targetDbConfigRepository;
         this.storedProcedureInvoker = storedProcedureInvoker;
         this.actionHandlersByType = new EnumMap<>(actionHandlersByType);
@@ -102,8 +106,14 @@ public class ScheduleExecutor {
         List<ScheduleParameter> parameters = scheduleParameterRepository.findByScheduleId(scheduleId);
         List<Object> boundParams = SpParameterResolver.resolve(parameters);
 
-        TargetDbConfig targetDb = targetDbConfigRepository.findById(schedule.targetDbConfigId())
-                .orElseThrow(() -> new ScheduleNotFoundException(schedule.targetDbConfigId()));
+        // T16 shim: takes only the first configured target DB, preserving pre-T15 single-target
+        // behavior. T17 replaces this with a full sequential multi-target loop producing
+        // TargetDbExecutionResult/PARTIAL_SUCCESS (PLAN.md §3.1b) - this method is rewritten
+        // there, not patched incrementally.
+        List<Long> targetDbConfigIds = scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(scheduleId);
+        long targetDbConfigId = targetDbConfigIds.get(0);
+        TargetDbConfig targetDb = targetDbConfigRepository.findById(targetDbConfigId)
+                .orElseThrow(() -> new ScheduleNotFoundException(targetDbConfigId));
 
         List<Map<String, Object>> spResultRows = storedProcedureInvoker.invoke(
                 targetDb.jdbcUrl(), targetDb.username(), targetDb.password(), schedule.spName(), boundParams

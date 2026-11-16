@@ -82,7 +82,7 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
                   "cronExpression": "0 0 9 ? * MON",
                   "timezone": "Asia/Seoul",
                   "spName": "%s",
-                  "targetDbConfigId": %d,
+                  "targetDbConfigIds": [%d],
                   "actionType": "DISPLAY_ONLY",
                   "actionConfig": {"displayFormat": "TABLE"}
                 }

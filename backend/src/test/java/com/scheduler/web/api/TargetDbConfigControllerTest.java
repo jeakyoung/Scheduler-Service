@@ -9,6 +9,7 @@ import com.scheduler.domain.schedule.ActionType;
 import com.scheduler.domain.schedule.DisplayOnlyActionConfig;
 import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
 import com.scheduler.infra.persistence.jdbc.AbstractRepositoryIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +17,8 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -40,6 +43,9 @@ class TargetDbConfigControllerTest extends AbstractRepositoryIntegrationTest {
 
     @Autowired
     private ScheduleRepository scheduleRepository;
+
+    @Autowired
+    private ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
 
     @Test
     void shortPasswordIsFullyMaskedNotLeakedInTheClear() throws Exception {
@@ -100,12 +106,13 @@ class TargetDbConfigControllerTest extends AbstractRepositoryIntegrationTest {
     @Test
     void deleteIsBlockedWhenReferencedBySchedule() throws Exception {
         TargetDbConfig config = targetDbConfigRepository.save(new TargetDbConfig(null, "In use", "jdbc:x;", "u", "pw", null, null));
-        scheduleRepository.save(new ScheduleDefinition(
+        ScheduleDefinition schedule = scheduleRepository.save(new ScheduleDefinition(
                 null, "Referencing schedule", false, "0 0 9 ? * MON", "Asia/Seoul",
-                "SP_X", config.id(), ActionType.DISPLAY_ONLY,
+                "SP_X", ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig(null, null)),
                 null, null, null, "tester"
         ));
+        scheduleTargetDbConfigRepository.replaceForSchedule(schedule.id(), List.of(config.id()));
 
         mockMvc.perform(delete("/api/config/target-db/" + config.id()))
                 .andExpect(status().isConflict());

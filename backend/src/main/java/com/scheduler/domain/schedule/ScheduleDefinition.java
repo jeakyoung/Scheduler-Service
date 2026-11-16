@@ -14,7 +14,6 @@ public record ScheduleDefinition(
         String cronExpression,
         String timezone,
         String spName,
-        Long targetDbConfigId,
         ActionType actionType,
         String actionConfig,
         String description,

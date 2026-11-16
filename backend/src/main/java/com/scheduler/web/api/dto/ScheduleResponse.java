@@ -17,7 +17,7 @@ public record ScheduleResponse(
         String cronExpression,
         String timezone,
         String spName,
-        long targetDbConfigId,
+        List<Long> targetDbConfigIds,
         ActionType actionType,
         JsonNode actionConfig,
         String description,

@@ -82,7 +82,7 @@ class ScheduleRegistrarIntegrationTest extends AbstractQuartzIntegrationTest {
     private ScheduleDefinition schedule(long id, String cron, String timezone, boolean enabled) {
         return new ScheduleDefinition(
                 id, "Quartz test schedule " + id, enabled, cron, timezone,
-                "SP_SAMPLE", 1L, ActionType.DISPLAY_ONLY,
+                "SP_SAMPLE", ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig(null, null)),
                 null, null, null, "tester"
         );

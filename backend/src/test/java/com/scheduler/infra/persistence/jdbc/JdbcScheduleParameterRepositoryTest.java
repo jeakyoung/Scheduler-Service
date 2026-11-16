@@ -1,6 +1,5 @@
 package com.scheduler.infra.persistence.jdbc;
 
-import com.scheduler.domain.config.TargetDbConfig;
 import com.scheduler.domain.schedule.ActionConfigJson;
 import com.scheduler.domain.schedule.ActionType;
 import com.scheduler.domain.schedule.DisplayOnlyActionConfig;
@@ -24,20 +23,13 @@ class JdbcScheduleParameterRepositoryTest extends AbstractRepositoryIntegrationT
     @Autowired
     private JdbcScheduleRepository scheduleRepository;
 
-    @Autowired
-    private JdbcTargetDbConfigRepository targetDbConfigRepository;
-
     private Long scheduleId;
 
     @BeforeEach
     void seedSchedule() {
-        TargetDbConfig config = targetDbConfigRepository.save(new TargetDbConfig(
-                null, "Test Target DB", "jdbc:sqlserver://example-business-db;", "biz_user", "enc", null, null
-        ));
-
         ScheduleDefinition schedule = scheduleRepository.save(new ScheduleDefinition(
                 null, "Parameterized schedule", true, "0 0 9 ? * MON", "Asia/Seoul",
-                "SP_SAMPLE_WITH_PARAMS", config.id(), ActionType.DISPLAY_ONLY,
+                "SP_SAMPLE_WITH_PARAMS", ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig("TABLE", null)),
                 null, null, null, "tester"
         ));

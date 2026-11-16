@@ -12,6 +12,7 @@ import com.scheduler.domain.schedule.GroupingMode;
 import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleParameterRepository;
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
 import com.scheduler.engine.action.ApiCallActionHandler;
 import com.scheduler.engine.action.DisplayOnlyActionHandler;
 import com.scheduler.engine.sp.StoredProcedureExecutionException;
@@ -43,6 +44,7 @@ class ScheduleExecutorTest {
 
     private ScheduleRepository scheduleRepository;
     private ScheduleParameterRepository scheduleParameterRepository;
+    private ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
     private TargetDbConfigRepository targetDbConfigRepository;
     private StoredProcedureInvoker storedProcedureInvoker;
     private CredentialRepository credentialRepository;
@@ -59,6 +61,7 @@ class ScheduleExecutorTest {
     void setUp() throws IOException {
         scheduleRepository = mock(ScheduleRepository.class);
         scheduleParameterRepository = mock(ScheduleParameterRepository.class);
+        scheduleTargetDbConfigRepository = mock(ScheduleTargetDbConfigRepository.class);
         targetDbConfigRepository = mock(TargetDbConfigRepository.class);
         storedProcedureInvoker = mock(StoredProcedureInvoker.class);
         credentialRepository = mock(CredentialRepository.class);
@@ -67,6 +70,8 @@ class ScheduleExecutorTest {
         lastExecutionResultStore = new LastExecutionResultStore();
 
         when(scheduleParameterRepository.findByScheduleId(anyLong())).thenReturn(List.of());
+        when(scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(SCHEDULE_ID))
+                .thenReturn(List.of(TARGET_DB_CONFIG_ID));
         when(targetDbConfigRepository.findById(TARGET_DB_CONFIG_ID)).thenReturn(Optional.of(
                 new TargetDbConfig(TARGET_DB_CONFIG_ID, "test db", "jdbc:sqlserver://unused;", "user", "pw", null, null)
         ));
@@ -99,6 +104,7 @@ class ScheduleExecutorTest {
         return new ScheduleExecutor(
                 scheduleRepository,
                 scheduleParameterRepository,
+                scheduleTargetDbConfigRepository,
                 targetDbConfigRepository,
                 storedProcedureInvoker,
                 Map.of(
@@ -225,7 +231,7 @@ class ScheduleExecutorTest {
 
         FakeExecutionResultSink alternateSink = new FakeExecutionResultSink();
         ScheduleExecutor executor = new ScheduleExecutor(
-                scheduleRepository, scheduleParameterRepository, targetDbConfigRepository,
+                scheduleRepository, scheduleParameterRepository, scheduleTargetDbConfigRepository, targetDbConfigRepository,
                 storedProcedureInvoker,
                 Map.of(ActionType.DISPLAY_ONLY, new DisplayOnlyActionHandler()),
                 alternateSink, displayOutputStore, lastExecutionResultStore
@@ -276,7 +282,7 @@ class ScheduleExecutorTest {
     private ScheduleDefinition displayOnlySchedule() {
         return new ScheduleDefinition(
                 SCHEDULE_ID, "Display only test", true, "0 0 9 ? * MON", "Asia/Seoul",
-                "SP_SAMPLE", TARGET_DB_CONFIG_ID, ActionType.DISPLAY_ONLY,
+                "SP_SAMPLE", ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig(null, null)),
                 null, null, null, "tester"
         );
@@ -294,7 +300,7 @@ class ScheduleExecutorTest {
         );
         return new ScheduleDefinition(
                 SCHEDULE_ID, "API call test", true, "0 0/30 * ? * MON-FRI", "Asia/Seoul",
-                "SP_SAMPLE", TARGET_DB_CONFIG_ID, ActionType.API_CALL,
+                "SP_SAMPLE", ActionType.API_CALL,
                 ActionConfigJson.write(config),
                 null, null, null, "tester"
         );

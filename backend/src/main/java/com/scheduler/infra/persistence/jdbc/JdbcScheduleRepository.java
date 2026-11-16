@@ -25,7 +25,6 @@ public class JdbcScheduleRepository implements ScheduleRepository {
             rs.getString("cron_expression"),
             rs.getString("timezone"),
             rs.getString("sp_name"),
-            rs.getLong("target_db_config_id"),
             ActionType.valueOf(rs.getString("action_type")),
             rs.getString("action_config"),
             rs.getString("description"),
@@ -67,8 +66,8 @@ public class JdbcScheduleRepository implements ScheduleRepository {
 
         jdbc.update(
                 "INSERT INTO schedule_definition " +
-                        "(name, enabled, cron_expression, timezone, sp_name, target_db_config_id, action_type, action_config, description, updated_by) " +
-                        "VALUES (:name, :enabled, :cronExpression, :timezone, :spName, :targetDbConfigId, :actionType, :actionConfig, :description, :updatedBy)",
+                        "(name, enabled, cron_expression, timezone, sp_name, action_type, action_config, description, updated_by) " +
+                        "VALUES (:name, :enabled, :cronExpression, :timezone, :spName, :actionType, :actionConfig, :description, :updatedBy)",
                 params,
                 keyHolder,
                 new String[]{"id"}
@@ -86,7 +85,7 @@ public class JdbcScheduleRepository implements ScheduleRepository {
 
         jdbc.update(
                 "UPDATE schedule_definition SET name = :name, enabled = :enabled, cron_expression = :cronExpression, " +
-                        "timezone = :timezone, sp_name = :spName, target_db_config_id = :targetDbConfigId, " +
+                        "timezone = :timezone, sp_name = :spName, " +
                         "action_type = :actionType, action_config = :actionConfig, description = :description, " +
                         "updated_by = :updatedBy, updated_at = :updatedAt WHERE id = :id",
                 params
@@ -120,7 +119,6 @@ public class JdbcScheduleRepository implements ScheduleRepository {
                 .addValue("cronExpression", schedule.cronExpression())
                 .addValue("timezone", schedule.timezone())
                 .addValue("spName", schedule.spName())
-                .addValue("targetDbConfigId", schedule.targetDbConfigId())
                 .addValue("actionType", schedule.actionType().name())
                 .addValue("actionConfig", schedule.actionConfig())
                 .addValue("description", schedule.description())

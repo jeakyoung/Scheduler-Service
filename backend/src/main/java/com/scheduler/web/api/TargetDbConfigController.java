@@ -4,6 +4,7 @@ import com.scheduler.domain.config.TargetDbConfig;
 import com.scheduler.domain.config.TargetDbConfigRepository;
 import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
 import com.scheduler.web.api.dto.TargetDbConfigRequest;
 import com.scheduler.web.api.dto.TargetDbConfigResponse;
 import jakarta.validation.Valid;
@@ -25,10 +26,16 @@ public class TargetDbConfigController {
 
     private final TargetDbConfigRepository targetDbConfigRepository;
     private final ScheduleRepository scheduleRepository;
+    private final ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
 
-    public TargetDbConfigController(TargetDbConfigRepository targetDbConfigRepository, ScheduleRepository scheduleRepository) {
+    public TargetDbConfigController(
+            TargetDbConfigRepository targetDbConfigRepository,
+            ScheduleRepository scheduleRepository,
+            ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository
+    ) {
         this.targetDbConfigRepository = targetDbConfigRepository;
         this.scheduleRepository = scheduleRepository;
+        this.scheduleTargetDbConfigRepository = scheduleTargetDbConfigRepository;
     }
 
     @GetMapping("/api/config/target-db")
@@ -59,8 +66,9 @@ public class TargetDbConfigController {
     public void delete(@PathVariable long id) {
         requireExists(id);
 
-        List<String> referencingSchedules = scheduleRepository.findAll().stream()
-                .filter(s -> s.targetDbConfigId() != null && s.targetDbConfigId() == id)
+        List<Long> referencingScheduleIds = scheduleTargetDbConfigRepository.findScheduleIdsByTargetDbConfigId(id);
+        List<String> referencingSchedules = referencingScheduleIds.stream()
+                .flatMap(scheduleId -> scheduleRepository.findById(scheduleId).stream())
                 .map(ScheduleDefinition::name)
                 .toList();
 

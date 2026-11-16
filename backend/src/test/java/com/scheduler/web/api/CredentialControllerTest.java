@@ -2,8 +2,6 @@ package com.scheduler.web.api;
 
 import com.scheduler.domain.config.Credential;
 import com.scheduler.domain.config.CredentialRepository;
-import com.scheduler.domain.config.TargetDbConfig;
-import com.scheduler.domain.config.TargetDbConfigRepository;
 import com.scheduler.domain.schedule.ActionConfigJson;
 import com.scheduler.domain.schedule.ActionType;
 import com.scheduler.domain.schedule.ApiCallActionConfig;
@@ -39,15 +37,6 @@ class CredentialControllerTest extends AbstractRepositoryIntegrationTest {
 
     @Autowired
     private ScheduleRepository scheduleRepository;
-
-    @Autowired
-    private TargetDbConfigRepository targetDbConfigRepository;
-
-    private long seedTargetDbConfig() {
-        return targetDbConfigRepository.save(new TargetDbConfig(
-                null, "Test target DB", "jdbc:sqlserver://x;", "u", "pw", null, null
-        )).id();
-    }
 
     @Test
     void shortValueIsFullyMaskedNotLeakedInTheClear() throws Exception {
@@ -101,7 +90,7 @@ class CredentialControllerTest extends AbstractRepositoryIntegrationTest {
         ));
         scheduleRepository.save(new ScheduleDefinition(
                 null, "Uses credential", false, "0 0 9 ? * MON", "Asia/Seoul",
-                "SP_X", seedTargetDbConfig(), ActionType.API_CALL, actionConfig, null, null, null, "tester"
+                "SP_X", ActionType.API_CALL, actionConfig, null, null, null, "tester"
         ));
 
         mockMvc.perform(delete("/api/config/credentials/" + credential.id()))
@@ -120,7 +109,7 @@ class CredentialControllerTest extends AbstractRepositoryIntegrationTest {
         ));
         scheduleRepository.save(new ScheduleDefinition(
                 null, "Uses credential 2", false, "0 0 9 ? * MON", "Asia/Seoul",
-                "SP_X", seedTargetDbConfig(), ActionType.API_CALL, actionConfig, null, null, null, "tester"
+                "SP_X", ActionType.API_CALL, actionConfig, null, null, null, "tester"
         ));
 
         mockMvc.perform(delete("/api/config/credentials/" + credential.id()).param("force", "true"))

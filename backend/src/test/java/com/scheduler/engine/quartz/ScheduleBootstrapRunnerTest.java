@@ -45,7 +45,7 @@ class ScheduleBootstrapRunnerTest {
     private ScheduleDefinition schedule(long id) {
         return new ScheduleDefinition(
                 id, "Bootstrap test " + id, true, "0 0 9 ? * MON", "Asia/Seoul",
-                "SP_SAMPLE", 1L, ActionType.DISPLAY_ONLY,
+                "SP_SAMPLE", ActionType.DISPLAY_ONLY,
                 ActionConfigJson.write(new DisplayOnlyActionConfig(null, null)),
                 null, null, null, "tester"
         );

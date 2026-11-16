@@ -10,6 +10,7 @@ import com.scheduler.domain.schedule.GroupingMode;
 import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleParameterRepository;
 import com.scheduler.domain.schedule.ScheduleRepository;
+import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
 import com.scheduler.engine.action.ApiCallActionHandler;
 import com.scheduler.engine.action.DisplayOnlyActionHandler;
 import com.scheduler.engine.execution.DisplayOutputStore;
@@ -54,6 +55,7 @@ class LegacyPatternScenarioTest {
 
     private ScheduleRepository scheduleRepository;
     private ScheduleParameterRepository scheduleParameterRepository;
+    private ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
     private TargetDbConfigRepository targetDbConfigRepository;
     private StoredProcedureInvoker storedProcedureInvoker;
     private CredentialRepository credentialRepository;
@@ -65,6 +67,7 @@ class LegacyPatternScenarioTest {
     void setUp() throws IOException {
         scheduleRepository = mock(ScheduleRepository.class);
         scheduleParameterRepository = mock(ScheduleParameterRepository.class);
+        scheduleTargetDbConfigRepository = mock(ScheduleTargetDbConfigRepository.class);
         targetDbConfigRepository = mock(TargetDbConfigRepository.class);
         storedProcedureInvoker = mock(StoredProcedureInvoker.class);
         credentialRepository = mock(CredentialRepository.class);
@@ -72,6 +75,8 @@ class LegacyPatternScenarioTest {
         // Legacy's 3 tasks all called their SP with no bound parameters - reproduced here by
         // schedule_parameter simply having no rows for this schedule.
         when(scheduleParameterRepository.findByScheduleId(SCHEDULE_ID)).thenReturn(List.of());
+        when(scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(SCHEDULE_ID))
+                .thenReturn(List.of(TARGET_DB_CONFIG_ID));
         when(targetDbConfigRepository.findById(TARGET_DB_CONFIG_ID)).thenReturn(Optional.of(
                 new TargetDbConfig(TARGET_DB_CONFIG_ID, "legacy business db", "jdbc:sqlserver://unused;", "user", "pw", null, null)
         ));
@@ -100,6 +105,7 @@ class LegacyPatternScenarioTest {
         return new ScheduleExecutor(
                 scheduleRepository,
                 scheduleParameterRepository,
+                scheduleTargetDbConfigRepository,
                 targetDbConfigRepository,
                 storedProcedureInvoker,
                 Map.of(
@@ -138,7 +144,7 @@ class LegacyPatternScenarioTest {
         );
         ScheduleDefinition schedule = new ScheduleDefinition(
                 SCHEDULE_ID, "Weekly work-limit notice (legacy Day pattern)", true, cron, "Asia/Seoul",
-                "SP_WORK_LIMIT_LIST", TARGET_DB_CONFIG_ID, ActionType.API_CALL,
+                "SP_WORK_LIMIT_LIST", ActionType.API_CALL,
                 ActionConfigJson.write(config), null, null, null, "tester"
         );
         when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
@@ -173,7 +179,7 @@ class LegacyPatternScenarioTest {
         );
         ScheduleDefinition schedule = new ScheduleDefinition(
                 SCHEDULE_ID, "Work-limit-exceeded notice (legacy Hour pattern)", true, cron, "Asia/Seoul",
-                "SP_WORK_LIMIT_LIST", TARGET_DB_CONFIG_ID, ActionType.API_CALL,
+                "SP_WORK_LIMIT_LIST", ActionType.API_CALL,
                 ActionConfigJson.write(config), null, null, null, "tester"
         );
         when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
@@ -207,7 +213,7 @@ class LegacyPatternScenarioTest {
         );
         ScheduleDefinition schedule = new ScheduleDefinition(
                 SCHEDULE_ID, "Unconfirmed purchase request notice (legacy PurchaseReq pattern)", true, cron, "Asia/Seoul",
-                "SP_PURCHASE_REQ_NOTICE", TARGET_DB_CONFIG_ID, ActionType.API_CALL,
+                "SP_PURCHASE_REQ_NOTICE", ActionType.API_CALL,
                 ActionConfigJson.write(config), null, null, null, "tester"
         );
         when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));

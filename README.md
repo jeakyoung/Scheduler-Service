@@ -21,7 +21,7 @@
 | `INITIAL_ADMIN_PASSWORD` | (최초 기동 시) 시드할 관리자 비밀번호 |
 | `CORS_ALLOWED_ORIGIN` | 프론트엔드(React SPA) 배포 오리진, 쉼표로 복수 허용. 로컬 기본값 `http://localhost:5173` |
 | `SERVER_PORT` | (선택) 기본 8080 |
-| `AUTH_DISABLED` | **로컬 개발 전용, 운영 환경에서는 절대 설정하지 말 것.** `true`로 설정하면 모든 `/api/**`가 토큰 없이 호출 가능해진다(로그인 생략). 기본값 `false`(미설정 시 평소처럼 인증 필요) — 켜져 있으면 기동 로그에 WARN이 찍힌다 |
+| `AUTH_DISABLED` | **로컬 개발 전용, 운영 환경에서는 절대 설정하지 말 것.** `true`로 설정하면 모든 `/api/**`가 토큰 없이 호출 가능해진다(로그인 생략). 기본값 `false`(미설정 시 평소처럼 인증 필요) — 켜져 있으면 기동 로그에 WARN이 찍힌다. **서버 쪽 토큰 검사만 끄는 것**이라, 프론트(React SPA)의 클라이언트 사이드 라우트 가드는 별개로 계속 로그인을 요구함 — 프론트까지 로그인 없이 쓰려면 `frontend/.env.local`의 `VITE_AUTH_DISABLED`도 같이 켜야 함(아래 프론트엔드 섹션 참고) |
 
 위 값들은 모두 `backend/src/main/resources/application.yml`에서 `${VAR}` 형태로만 참조되며, 소스에 실제 값은 들어있지 않다.
 
@@ -44,6 +44,7 @@ Vite + React + TypeScript SPA. 백엔드와 별도로 빌드/배포된다. 백�
 | 환경변수 (`.env.local`, gitignore) | 설명 |
 |---|---|
 | `VITE_API_BASE_URL` | 백엔드 API base URL. 로컬 기본값 `http://localhost:8080`. 실제 값은 `.env.example`을 복사한 `.env.local`에만 둔다 |
+| `VITE_AUTH_DISABLED` | **로컬 개발 전용, 운영 환경에서는 절대 설정하지 말 것.** `true`로 설정하면 실제 로그인 호출 없이 `AuthContext`의 `user`를 더미 값(`{username: "local-dev", role: "ADMIN"}`)으로 즉시 채워서, `ProtectedRoute`가 `/login`으로 리다이렉트하지 않게 한다. 기본값 `false`(미설정 시 평소처럼 로그인 필요). **백엔드의 `AUTH_DISABLED`와 반드시 같이 켜야 의미가 있다** — 둘은 서로 독립된 게이트라, 하나만 켜면 다른 쪽에서 막힌다(백엔드만 켜면 프론트 라우트 가드가 여전히 로그인 화면으로 보내고, 프론트만 켜면 백엔드가 여전히 토큰을 검사해서 API 호출이 401로 실패한다). 켜져 있으면 네비게이션 바에 "로컬 인증 비활성화" 배지가 표시됨(백엔드의 기동 WARN 로그와 같은 목적 — 운영에서 실수로 켜졌을 때 바로 눈에 띄도록) |
 
 ### 빌드/실행
 

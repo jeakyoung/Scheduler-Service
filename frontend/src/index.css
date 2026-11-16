@@ -171,6 +171,14 @@ fieldset {
 .app-nav-spacer {
   flex: 1;
 }
+.auth-disabled-badge {
+  color: #fff;
+  background: var(--danger);
+  font-weight: 600;
+  font-size: 12px;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
 .app-main {
   padding: 24px;
   text-align: left;

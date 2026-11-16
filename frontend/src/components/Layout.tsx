@@ -1,5 +1,5 @@
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import { useAuth } from "../auth/AuthContext";
+import { isAuthDisabled, useAuth } from "../auth/AuthContext";
 
 export default function Layout() {
   const { user, logout } = useAuth();
@@ -13,6 +13,7 @@ export default function Layout() {
   return (
     <div className="app-layout">
       <nav className="app-nav">
+        {isAuthDisabled && <span className="auth-disabled-badge">로컬 인증 비활성화</span>}
         <NavLink to="/schedules">스케줄</NavLink>
         <NavLink to="/target-db-configs">대상 DB 설정</NavLink>
         <NavLink to="/credentials">자격증명</NavLink>

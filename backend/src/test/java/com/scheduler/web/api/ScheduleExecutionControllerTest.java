@@ -107,6 +107,11 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
         JsonNode node = objectMapper.readTree(response);
         assertThat(node.at("/result/status").asText()).isEqualTo("SUCCESS");
         assertThat(node.at("/result/triggerType").asText()).isEqualTo("MANUAL");
+        // PLAN.md §6/T18 - run-now must expose the per-target-DB breakdown, not just the
+        // top-level summary.
+        assertThat(node.at("/result/targetDbResults")).hasSize(1);
+        assertThat(node.at("/result/targetDbResults/0/status").asText()).isEqualTo("SUCCESS");
+        assertThat(node.at("/result/targetDbResults/0/targetDbConfigId").asLong()).isEqualTo(targetDbConfigId);
     }
 
     @Test

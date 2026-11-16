@@ -18,6 +18,7 @@ public record ScheduleResponse(
         String timezone,
         String spName,
         List<Long> targetDbConfigIds,
+        List<TargetDbConfigRef> targetDbConfigs,
         ActionType actionType,
         JsonNode actionConfig,
         String description,

@@ -3,6 +3,7 @@ package com.scheduler.web.api;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.scheduler.domain.config.TargetDbConfigRepository;
 import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleParameter;
 import com.scheduler.domain.schedule.ScheduleParameterRepository;
@@ -15,6 +16,7 @@ import com.scheduler.web.api.dto.EnabledRequest;
 import com.scheduler.web.api.dto.ScheduleParameterResponse;
 import com.scheduler.web.api.dto.ScheduleRequest;
 import com.scheduler.web.api.dto.ScheduleResponse;
+import com.scheduler.web.api.dto.TargetDbConfigRef;
 import jakarta.validation.Valid;
 import org.quartz.CronExpression;
 import org.springframework.http.HttpStatus;
@@ -38,6 +40,7 @@ public class ScheduleController {
     private final ScheduleRepository scheduleRepository;
     private final ScheduleParameterRepository scheduleParameterRepository;
     private final ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
+    private final TargetDbConfigRepository targetDbConfigRepository;
     private final ScheduleRegistrar scheduleRegistrar;
     private final ObjectMapper objectMapper;
 
@@ -45,12 +48,14 @@ public class ScheduleController {
             ScheduleRepository scheduleRepository,
             ScheduleParameterRepository scheduleParameterRepository,
             ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository,
+            TargetDbConfigRepository targetDbConfigRepository,
             ScheduleRegistrar scheduleRegistrar,
             ObjectMapper objectMapper
     ) {
         this.scheduleRepository = scheduleRepository;
         this.scheduleParameterRepository = scheduleParameterRepository;
         this.scheduleTargetDbConfigRepository = scheduleTargetDbConfigRepository;
+        this.targetDbConfigRepository = targetDbConfigRepository;
         this.scheduleRegistrar = scheduleRegistrar;
         this.objectMapper = objectMapper;
     }
@@ -73,6 +78,7 @@ public class ScheduleController {
         validateCron(request.cronExpression());
         SqlIdentifierValidator.validate(request.spName());
         ActionConfigRequestValidator.validate(request.actionType(), actionConfigJson);
+        validateTargetDbConfigIds(request.targetDbConfigIds());
 
         ScheduleDefinition saved = scheduleRepository.save(new ScheduleDefinition(
                 null, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
@@ -91,6 +97,7 @@ public class ScheduleController {
         validateCron(request.cronExpression());
         SqlIdentifierValidator.validate(request.spName());
         ActionConfigRequestValidator.validate(request.actionType(), actionConfigJson);
+        validateTargetDbConfigIds(request.targetDbConfigIds());
 
         ScheduleDefinition updated = scheduleRepository.update(new ScheduleDefinition(
                 id, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
@@ -129,6 +136,20 @@ public class ScheduleController {
         }
     }
 
+    /**
+     * @NotEmpty on the request DTO already rejects an empty array; this catches the other
+     * 400 case PLAN.md §6 calls for - an id that doesn't exist - before replaceForSchedule
+     * would otherwise hit it as an FK violation (500, not 400).
+     */
+    private void validateTargetDbConfigIds(List<Long> targetDbConfigIds) {
+        List<Long> missing = targetDbConfigIds.stream()
+                .filter(id -> targetDbConfigRepository.findById(id).isEmpty())
+                .toList();
+        if (!missing.isEmpty()) {
+            throw new IllegalArgumentException("target_db_config id(s) not found: " + missing);
+        }
+    }
+
     private String writeActionConfig(JsonNode node) {
         try {
             return objectMapper.writeValueAsString(node);
@@ -154,10 +175,14 @@ public class ScheduleController {
                 .toList();
 
         List<Long> targetDbConfigIds = scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(schedule.id());
+        List<TargetDbConfigRef> targetDbConfigs = targetDbConfigIds.stream()
+                .flatMap(id -> targetDbConfigRepository.findById(id).stream())
+                .map(config -> new TargetDbConfigRef(config.id(), config.name()))
+                .toList();
 
         return new ScheduleResponse(
                 schedule.id(), schedule.name(), schedule.enabled(), schedule.cronExpression(), schedule.timezone(),
-                schedule.spName(), targetDbConfigIds, schedule.actionType(), actionConfigNode,
+                schedule.spName(), targetDbConfigIds, targetDbConfigs, schedule.actionType(), actionConfigNode,
                 schedule.description(), schedule.createdAt(), schedule.updatedAt(), schedule.updatedBy(),
                 nextFireTime, parameterResponses
         );

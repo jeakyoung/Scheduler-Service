@@ -15,6 +15,9 @@ import org.springframework.http.MediaType;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
@@ -131,6 +134,91 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(apiCallRequestBody(true, "not a cron")))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createWithEmptyTargetDbConfigIdsIsBadRequest() throws Exception {
+        String body = """
+                {
+                  "name": "No target DB",
+                  "enabled": true,
+                  "cronExpression": "0 0 9 ? * MON",
+                  "timezone": "Asia/Seoul",
+                  "spName": "SP_SAMPLE",
+                  "targetDbConfigIds": [],
+                  "actionType": "DISPLAY_ONLY",
+                  "actionConfig": {"displayFormat": "TABLE"}
+                }
+                """;
+
+        mockMvc.perform(post("/api/schedules").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createWithNonExistentTargetDbConfigIdIsBadRequest() throws Exception {
+        long nonExistentId = targetDbConfigId + 999_999L;
+        String body = """
+                {
+                  "name": "Bad target DB reference",
+                  "enabled": true,
+                  "cronExpression": "0 0 9 ? * MON",
+                  "timezone": "Asia/Seoul",
+                  "spName": "SP_SAMPLE",
+                  "targetDbConfigIds": [%d],
+                  "actionType": "DISPLAY_ONLY",
+                  "actionConfig": {"displayFormat": "TABLE"}
+                }
+                """.formatted(nonExistentId);
+
+        mockMvc.perform(post("/api/schedules").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void createAndListResolveTargetDbConfigNamesForMultipleTargets() throws Exception {
+        TargetDbConfig secondConfig = targetDbConfigRepository.save(new TargetDbConfig(
+                null, "Second Target DB", "jdbc:sqlserver://second-business-db;", "biz_user2", "pw", null, null
+        ));
+        String body = """
+                {
+                  "name": "Multi target schedule",
+                  "enabled": true,
+                  "cronExpression": "0 0 9 ? * MON",
+                  "timezone": "Asia/Seoul",
+                  "spName": "SP_SAMPLE",
+                  "targetDbConfigIds": [%d, %d],
+                  "actionType": "DISPLAY_ONLY",
+                  "actionConfig": {"displayFormat": "TABLE"}
+                }
+                """.formatted(targetDbConfigId, secondConfig.id());
+
+        String createResponse = mockMvc.perform(post("/api/schedules").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.targetDbConfigIds", org.hamcrest.Matchers.containsInAnyOrder(
+                        (int) targetDbConfigId, secondConfig.id().intValue())))
+                .andExpect(jsonPath("$.targetDbConfigs[*].name", org.hamcrest.Matchers.containsInAnyOrder(
+                        "Test Target DB", "Second Target DB")))
+                .andReturn().getResponse().getContentAsString();
+        long id = objectMapper.readTree(createResponse).get("id").asLong();
+
+        // The shared singleton test DB accumulates schedules across test methods, so look up
+        // this schedule specifically rather than assuming list order.
+        String listResponse = mockMvc.perform(get("/api/schedules"))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        JsonNode listNode = objectMapper.readTree(listResponse);
+        JsonNode thisSchedule = null;
+        for (JsonNode node : listNode) {
+            if (node.get("id").asLong() == id) {
+                thisSchedule = node;
+                break;
+            }
+        }
+        assertThat(thisSchedule).isNotNull();
+        List<String> names = new ArrayList<>();
+        thisSchedule.get("targetDbConfigs").forEach(ref -> names.add(ref.get("name").asText()));
+        assertThat(names).containsExactlyInAnyOrder("Test Target DB", "Second Target DB");
     }
 
     @Test

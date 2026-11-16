@@ -364,3 +364,11 @@
 - 신규 테스트(T17 고유 DoD, `ScheduleExecutorTest`에 4개 추가): ① 대상DB 2개 전부 성공 → `SUCCESS`, ② 대상DB 2개 중 1개만 실패(존재하는 jdbcUrl로 mock 구분) → `PARTIAL_SUCCESS` + 실패한 대상DB만 `targetDbResults`에서 FAILURE로 정확히 표시 + **mock 호출횟수로 두 대상DB 모두 실제 호출됐음을 검증**(한쪽 예외가 다른쪽을 막지 않음), ③ 대상DB 2개 전부 실패 → `FAILURE`, ④ `DISPLAY_ONLY` + 대상DB 2개 → `DisplayOutputStore.getAllForSchedule(id)`가 서로 다른 행 데이터를 가진 2건을 반환하고 섞이지 않음. credential 비노출 확인도 대상DB별 summary/errorMessage 레벨까지 확장(`apiCallSchedulePerRowAllSucceed`에 추가 단언).
 - DoD 점검: `mvn test` 전체 **112개 테스트 그린**(T16 이후 108 + 신규 4). `mvn clean package` 재확인 성공.
 - 다음 작업: T18(관리자 REST API 변경 — `targetDbConfigIds` 빈배열/존재하지않는id 400 검증, `targetDbConfigs:[{id,name}]` 응답 enrichment, run-now/last-result 응답 재구성은 T17에서 이미 일부 완료됨)로 바로 이어서 진행.
+
+## 2026-11-16 — T18: targetDbConfigIds 검증(400) + targetDbConfigs 이름 응답 (worker)
+- PLAN.md §6/TASKS.md T18. T16/T17에서 이미 끝난 부분(단수→복수 필드 전환, `replaceForSchedule` 배선, `run-now`/`last-result`의 대상DB별 `targetDbResults`/`displayOutputs` 응답 구조, `TargetDbConfigController` 삭제차단)은 재작업 없이 그대로 두고, 이번엔 T18에만 남아있던 두 가지를 마무리했다.
+- `ScheduleRequest.targetDbConfigIds`에 `@NotEmpty` 추가 — 빈 배열로 생성/수정 시 기존 `MethodArgumentNotValidException` → 400 경로를 그대로 탐(신규 예외처리 불필요). `ScheduleController`에 `validateTargetDbConfigIds(...)` 추가 — 존재하지 않는 `target_db_config_id`가 섞여 있으면 `IllegalArgumentException` → 400으로 명확히 거부(이전엔 `replaceForSchedule`의 FK 위반이 그대로 전파돼 500이 됐을 것). create/update 양쪽에 배선.
+- `ScheduleResponse`에 `targetDbConfigs: List<TargetDbConfigRef>`(신규 dto, `{id, name}`) 필드 추가(기존 `targetDbConfigIds: List<Long>`는 그대로 유지 — 프론트가 멀티셀렉트 초기값은 id로, 배지 표시는 이름으로 바로 쓸 수 있도록 둘 다 노출). `ScheduleController.toResponse`가 `targetDbConfigRepository.findById(...)`로 이름을 해석.
+- 신규 테스트(`ScheduleControllerTest`): ① 빈 `targetDbConfigIds`로 생성 시 400, ② 존재하지 않는 id로 생성 시 400, ③ 대상DB 2개로 생성 후 응답(`targetDbConfigIds`+`targetDbConfigs[*].name`)과 목록 조회(`GET /api/schedules`에서 해당 id를 찾아 확인 — 싱글톤 테스트 컨테이너가 테스트 메서드 간 데이터를 공유해 배열 순서를 가정할 수 없으므로 id로 찾아 검증)가 둘 다 올바른 이름을 담는지 확인. `ScheduleExecutionControllerTest`에 `run-now` 응답의 `result.targetDbResults` 배열 존재/내용 확인 단언 추가(T17에서 이미 구현됐지만 T18 DoD가 명시적으로 요구해 테스트로 고정).
+- DoD 점검: `mvn test` 전체 **115개 테스트 그린**(T17 이후 112 + 신규 3). `mvn clean package` 재확인 성공.
+- 다음 작업: 백엔드(T15~T18) 전부 완료. T19(프론트 CronBuilder)로 넘어감 — 사용자 지시대로 "백엔드 계약 확정 후 프론트 진행" 순서 준수.

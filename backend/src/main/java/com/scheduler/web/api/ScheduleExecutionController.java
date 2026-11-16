@@ -18,6 +18,8 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.List;
+
 /** PLAN.md §6 "실행" table - manual run-now + last-result + status. */
 @RestController
 public class ScheduleExecutionController {
@@ -51,28 +53,30 @@ public class ScheduleExecutionController {
     public RunResultResponse runNow(@PathVariable long id) {
         requireSchedule(id);
         ExecutionResult result = scheduleExecutor.execute(id, TriggerType.MANUAL);
-        return new RunResultResponse(result, displayOutputFor(id, result));
+        return new RunResultResponse(result, displayOutputsFor(id, result));
     }
 
     @GetMapping("/api/schedules/{id}/last-result")
     public ResponseEntity<RunResultResponse> lastResult(@PathVariable long id) {
         requireSchedule(id);
         return lastExecutionResultStore.get(id)
-                .map(result -> ResponseEntity.ok(new RunResultResponse(result, displayOutputFor(id, result))))
+                .map(result -> ResponseEntity.ok(new RunResultResponse(result, displayOutputsFor(id, result))))
                 .orElseGet(() -> ResponseEntity.noContent().build());
     }
 
     /**
-     * DisplayOutputStore only ever holds the latest *successful* DISPLAY_ONLY run - it is
-     * never cleared on a later failure. Without this check, run-now/last-result for a
-     * schedule whose current execution failed would still attach a stale displayOutput from
-     * some earlier successful run (REVIEW.md N3), which looks like "this failure's data".
+     * DisplayOutputStore only ever holds the latest *successful* snapshot per target DB - it
+     * is never cleared on a later failure. Without this per-target-DB filter, a target DB
+     * whose current execution failed would still show a stale displayOutput from some earlier
+     * successful run (REVIEW.md N3, extended to per-target-DB granularity for the
+     * multi-target-DB round - PLAN.md §3.1b/§3.3): only target DBs that succeeded in *this*
+     * result are included.
      */
-    private DisplayOutput displayOutputFor(long id, ExecutionResult result) {
-        if (result.status() != ExecutionStatus.SUCCESS) {
-            return null;
-        }
-        return displayOutputStore.get(id).orElse(null);
+    private List<DisplayOutput> displayOutputsFor(long scheduleId, ExecutionResult result) {
+        return result.targetDbResults().stream()
+                .filter(targetDbResult -> targetDbResult.status() == ExecutionStatus.SUCCESS)
+                .flatMap(targetDbResult -> displayOutputStore.get(scheduleId, targetDbResult.targetDbConfigId()).stream())
+                .toList();
     }
 
     @GetMapping("/api/schedules/{id}/status")

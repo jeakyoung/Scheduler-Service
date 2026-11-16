@@ -41,6 +41,7 @@ class ScheduleExecutorTest {
 
     private static final long SCHEDULE_ID = 1L;
     private static final long TARGET_DB_CONFIG_ID = 10L;
+    private static final long TARGET_DB_CONFIG_ID_2 = 20L;
 
     private ScheduleRepository scheduleRepository;
     private ScheduleParameterRepository scheduleParameterRepository;
@@ -127,7 +128,12 @@ class ScheduleExecutorTest {
         ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.MANUAL);
 
         assertThat(result.status()).isEqualTo(ExecutionStatus.FAILURE);
-        assertThat(result.errorMessage()).contains("SP_SAMPLE");
+        // Engine-level errorMessage stays schedule/engine-only (PLAN.md §3.1) - the target DB's
+        // own failure detail lives in targetDbResults[0].errorMessage instead.
+        assertThat(result.errorMessage()).isNull();
+        assertThat(result.targetDbResults()).hasSize(1);
+        assertThat(result.targetDbResults().get(0).status()).isEqualTo(ExecutionStatus.FAILURE);
+        assertThat(result.targetDbResults().get(0).errorMessage()).contains("SP_SAMPLE");
         assertThat(sink.recorded()).containsExactly(result);
     }
 
@@ -148,13 +154,15 @@ class ScheduleExecutorTest {
         ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.SCHEDULED);
 
         assertThat(result.status()).isEqualTo(ExecutionStatus.SUCCESS);
-        assertThat(result.summary()).contains("2/2 성공");
+        assertThat(result.targetDbResults().get(0).summary()).contains("2/2 성공");
         assertThat(receivedBodies).hasSize(2);
         assertThat(receivedBodies.get(0)).contains("E001");
         assertThat(receivedBodies.get(1)).contains("E002");
         // the decrypted credential value must never leak into the result
         assertThat(result.summary()).doesNotContain("super-secret-api-key-value");
         assertThat(String.valueOf(result.errorMessage())).doesNotContain("super-secret-api-key-value");
+        assertThat(result.targetDbResults().get(0).summary()).doesNotContain("super-secret-api-key-value");
+        assertThat(String.valueOf(result.targetDbResults().get(0).errorMessage())).doesNotContain("super-secret-api-key-value");
     }
 
     @Test
@@ -200,8 +208,9 @@ class ScheduleExecutorTest {
         ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.SCHEDULED);
 
         assertThat(result.status()).isEqualTo(ExecutionStatus.FAILURE);
-        assertThat(result.summary()).contains("1/2 성공");
-        assertThat(result.errorMessage()).contains("HTTP 500");
+        assertThat(result.targetDbResults()).hasSize(1);
+        assertThat(result.targetDbResults().get(0).summary()).contains("1/2 성공");
+        assertThat(result.targetDbResults().get(0).errorMessage()).contains("HTTP 500");
     }
 
     @Test
@@ -216,11 +225,99 @@ class ScheduleExecutorTest {
         ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.MANUAL);
 
         assertThat(result.status()).isEqualTo(ExecutionStatus.SUCCESS);
-        assertThat(result.summary()).contains("2행");
+        assertThat(result.targetDbResults().get(0).summary()).contains("2행");
 
-        DisplayOutput output = displayOutputStore.get(SCHEDULE_ID).orElseThrow();
+        DisplayOutput output = displayOutputStore.get(SCHEDULE_ID, TARGET_DB_CONFIG_ID).orElseThrow();
         assertThat(output.columns()).containsExactly("EMPLOYEE_NO", "EA_TITLE", "EXE_SEQ");
         assertThat(output.rows()).hasSize(2);
+    }
+
+    private void stubSecondTargetDb() {
+        when(scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(SCHEDULE_ID))
+                .thenReturn(List.of(TARGET_DB_CONFIG_ID, TARGET_DB_CONFIG_ID_2));
+        when(targetDbConfigRepository.findById(TARGET_DB_CONFIG_ID_2)).thenReturn(Optional.of(
+                new TargetDbConfig(TARGET_DB_CONFIG_ID_2, "test db 2", "jdbc:sqlserver://unused-2;", "user", "pw", null, null)
+        ));
+    }
+
+    @Test
+    void multiTargetDbAllSucceedYieldsOverallSuccess() {
+        stubSecondTargetDb();
+        ScheduleDefinition schedule = displayOnlySchedule();
+        when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
+        when(storedProcedureInvoker.invoke(any(), any(), any(), any(), any()))
+                .thenReturn(List.of(Map.of("EMPLOYEE_NO", "E001")));
+
+        ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.MANUAL);
+
+        assertThat(result.status()).isEqualTo(ExecutionStatus.SUCCESS);
+        assertThat(result.targetDbResults()).hasSize(2);
+        assertThat(result.targetDbResults()).allMatch(r -> r.status() == ExecutionStatus.SUCCESS);
+    }
+
+    @Test
+    void multiTargetDbOneFailureStillRunsTheOtherAndReportsPartialSuccess() {
+        // PLAN.md §3.1b: one target DB's StoredProcedureInvoker failure must not stop the
+        // sequential loop - verified here both by the aggregated status and by asserting the
+        // second target DB's invoke() call actually happened (mock call count).
+        stubSecondTargetDb();
+        ScheduleDefinition schedule = displayOnlySchedule();
+        when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
+        when(storedProcedureInvoker.invoke(org.mockito.ArgumentMatchers.eq("jdbc:sqlserver://unused;"), any(), any(), any(), any()))
+                .thenThrow(new StoredProcedureExecutionException("Failed to execute stored procedure SP_SAMPLE: timeout", null));
+        when(storedProcedureInvoker.invoke(org.mockito.ArgumentMatchers.eq("jdbc:sqlserver://unused-2;"), any(), any(), any(), any()))
+                .thenReturn(List.of(Map.of("EMPLOYEE_NO", "E002")));
+
+        ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.MANUAL);
+
+        assertThat(result.status()).isEqualTo(ExecutionStatus.PARTIAL_SUCCESS);
+        assertThat(result.targetDbResults()).hasSize(2);
+        assertThat(result.targetDbResults().get(0).targetDbConfigId()).isEqualTo(TARGET_DB_CONFIG_ID);
+        assertThat(result.targetDbResults().get(0).status()).isEqualTo(ExecutionStatus.FAILURE);
+        assertThat(result.targetDbResults().get(0).errorMessage()).contains("SP_SAMPLE");
+        assertThat(result.targetDbResults().get(1).targetDbConfigId()).isEqualTo(TARGET_DB_CONFIG_ID_2);
+        assertThat(result.targetDbResults().get(1).status()).isEqualTo(ExecutionStatus.SUCCESS);
+
+        org.mockito.Mockito.verify(storedProcedureInvoker, org.mockito.Mockito.times(1))
+                .invoke(org.mockito.ArgumentMatchers.eq("jdbc:sqlserver://unused;"), any(), any(), any(), any());
+        org.mockito.Mockito.verify(storedProcedureInvoker, org.mockito.Mockito.times(1))
+                .invoke(org.mockito.ArgumentMatchers.eq("jdbc:sqlserver://unused-2;"), any(), any(), any(), any());
+    }
+
+    @Test
+    void multiTargetDbAllFailYieldsOverallFailure() {
+        stubSecondTargetDb();
+        ScheduleDefinition schedule = displayOnlySchedule();
+        when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
+        when(storedProcedureInvoker.invoke(any(), any(), any(), any(), any()))
+                .thenThrow(new StoredProcedureExecutionException("boom", null));
+
+        ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.MANUAL);
+
+        assertThat(result.status()).isEqualTo(ExecutionStatus.FAILURE);
+        assertThat(result.targetDbResults()).hasSize(2);
+        assertThat(result.targetDbResults()).allMatch(r -> r.status() == ExecutionStatus.FAILURE);
+    }
+
+    @Test
+    void multiTargetDbDisplayOnlyKeepsSeparateDisplayOutputsPerTargetNeverMixed() {
+        stubSecondTargetDb();
+        ScheduleDefinition schedule = displayOnlySchedule();
+        when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
+        when(storedProcedureInvoker.invoke(org.mockito.ArgumentMatchers.eq("jdbc:sqlserver://unused;"), any(), any(), any(), any()))
+                .thenReturn(List.of(orderedRow("EMPLOYEE_NO", "E001")));
+        when(storedProcedureInvoker.invoke(org.mockito.ArgumentMatchers.eq("jdbc:sqlserver://unused-2;"), any(), any(), any(), any()))
+                .thenReturn(List.of(orderedRow("EMPLOYEE_NO", "E002")));
+
+        newExecutor().execute(SCHEDULE_ID, TriggerType.MANUAL);
+
+        List<DisplayOutput> outputs = displayOutputStore.getAllForSchedule(SCHEDULE_ID);
+        assertThat(outputs).hasSize(2);
+
+        DisplayOutput first = outputs.stream().filter(o -> o.targetDbConfigId() == TARGET_DB_CONFIG_ID).findFirst().orElseThrow();
+        DisplayOutput second = outputs.stream().filter(o -> o.targetDbConfigId() == TARGET_DB_CONFIG_ID_2).findFirst().orElseThrow();
+        assertThat(first.rows()).extracting(r -> r.get("EMPLOYEE_NO")).containsExactly("E001");
+        assertThat(second.rows()).extracting(r -> r.get("EMPLOYEE_NO")).containsExactly("E002");
     }
 
     @Test

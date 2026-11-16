@@ -159,7 +159,7 @@ class LegacyPatternScenarioTest {
         assertThat(result.status()).isEqualTo(ExecutionStatus.SUCCESS);
         // 3 rows, 2 distinct titles -> 2 HTTP calls (one per group), not 3 (not per-row)
         assertThat(receivedBodies).hasSize(2);
-        assertThat(result.summary()).contains("2/2 성공");
+        assertThat(result.targetDbResults().get(0).summary()).contains("2/2 성공");
     }
 
     /**

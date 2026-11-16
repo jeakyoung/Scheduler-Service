@@ -15,9 +15,11 @@ import com.scheduler.engine.sp.StoredProcedureInvoker;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -89,7 +91,7 @@ public class ScheduleExecutor {
         } catch (Exception e) {
             ExecutionResult failure = new ExecutionResult(
                     scheduleId, triggerType, startedAt, Instant.now(),
-                    ExecutionStatus.FAILURE, "실행 중 오류 발생", shortMessage(e)
+                    ExecutionStatus.FAILURE, "실행 중 오류 발생", shortMessage(e), List.of()
             );
             executionResultSink.record(failure);
             lastExecutionResultStore.put(failure);
@@ -99,36 +101,86 @@ public class ScheduleExecutor {
         }
     }
 
+    /**
+     * Visits every target DB configured for this schedule sequentially, not in parallel
+     * (PLAN.md §3.1b - the legacy tasks were sequential too, and this keeps partial-failure
+     * ordering simple without thread-pool management). Each target DB is wrapped in its own
+     * try/catch so one target DB's failure never stops the others from running (PLAN.md
+     * §3.1b's explicit partial-failure-tolerant decision).
+     */
     private ExecutionResult doExecute(long scheduleId, TriggerType triggerType, Instant startedAt) {
         ScheduleDefinition schedule = scheduleRepository.findById(scheduleId)
                 .orElseThrow(() -> new ScheduleNotFoundException(scheduleId));
 
         List<ScheduleParameter> parameters = scheduleParameterRepository.findByScheduleId(scheduleId);
         List<Object> boundParams = SpParameterResolver.resolve(parameters);
-
-        // T16 shim: takes only the first configured target DB, preserving pre-T15 single-target
-        // behavior. T17 replaces this with a full sequential multi-target loop producing
-        // TargetDbExecutionResult/PARTIAL_SUCCESS (PLAN.md §3.1b) - this method is rewritten
-        // there, not patched incrementally.
         List<Long> targetDbConfigIds = scheduleTargetDbConfigRepository.findTargetDbConfigIdsByScheduleId(scheduleId);
-        long targetDbConfigId = targetDbConfigIds.get(0);
-        TargetDbConfig targetDb = targetDbConfigRepository.findById(targetDbConfigId)
-                .orElseThrow(() -> new ScheduleNotFoundException(targetDbConfigId));
-
-        List<Map<String, Object>> spResultRows = storedProcedureInvoker.invoke(
-                targetDb.jdbcUrl(), targetDb.username(), targetDb.password(), schedule.spName(), boundParams
-        );
-
         ActionHandler handler = actionHandlersByType.get(schedule.actionType());
-        ActionOutcome outcome = handler.handle(schedule, spResultRows);
 
-        if (outcome.displayOutput() != null) {
-            displayOutputStore.put(outcome.displayOutput());
+        List<TargetDbExecutionResult> targetDbResults = new ArrayList<>();
+        for (long targetDbConfigId : targetDbConfigIds) {
+            targetDbResults.add(executeForTargetDb(schedule, targetDbConfigId, boundParams, handler));
         }
 
-        ExecutionStatus status = outcome.success() ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILURE;
-        return new ExecutionResult(scheduleId, triggerType, startedAt, Instant.now(), status,
-                outcome.summary(), outcome.errorMessage());
+        return new ExecutionResult(
+                scheduleId, triggerType, startedAt, Instant.now(),
+                aggregateStatus(targetDbResults), summarize(targetDbResults), null, targetDbResults
+        );
+    }
+
+    private TargetDbExecutionResult executeForTargetDb(
+            ScheduleDefinition schedule, long targetDbConfigId, List<Object> boundParams, ActionHandler handler
+    ) {
+        String targetDbConfigName = targetDbConfigRepository.findById(targetDbConfigId)
+                .map(TargetDbConfig::name)
+                .orElse("target-db-" + targetDbConfigId);
+        try {
+            TargetDbConfig targetDb = targetDbConfigRepository.findById(targetDbConfigId)
+                    .orElseThrow(() -> new NoSuchElementException("target_db_config " + targetDbConfigId + " not found"));
+
+            List<Map<String, Object>> spResultRows = storedProcedureInvoker.invoke(
+                    targetDb.jdbcUrl(), targetDb.username(), targetDb.password(), schedule.spName(), boundParams
+            );
+
+            ActionOutcome outcome = handler.handle(schedule, spResultRows);
+
+            if (outcome.displayOutput() != null) {
+                displayOutputStore.put(outcome.displayOutput().withTarget(targetDbConfigId, targetDbConfigName));
+            }
+
+            ExecutionStatus status = outcome.success() ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILURE;
+            return new TargetDbExecutionResult(targetDbConfigId, targetDbConfigName, status, outcome.summary(), outcome.errorMessage());
+        } catch (Exception e) {
+            return new TargetDbExecutionResult(
+                    targetDbConfigId, targetDbConfigName, ExecutionStatus.FAILURE, "대상DB 실행 중 오류 발생", shortMessage(e)
+            );
+        }
+    }
+
+    private static ExecutionStatus aggregateStatus(List<TargetDbExecutionResult> results) {
+        if (results.isEmpty()) {
+            return ExecutionStatus.FAILURE;
+        }
+        long successCount = results.stream().filter(r -> r.status() == ExecutionStatus.SUCCESS).count();
+        if (successCount == results.size()) {
+            return ExecutionStatus.SUCCESS;
+        }
+        if (successCount == 0) {
+            return ExecutionStatus.FAILURE;
+        }
+        return ExecutionStatus.PARTIAL_SUCCESS;
+    }
+
+    private static String summarize(List<TargetDbExecutionResult> results) {
+        if (results.isEmpty()) {
+            return "선택된 대상DB가 없음";
+        }
+        long successCount = results.stream().filter(r -> r.status() == ExecutionStatus.SUCCESS).count();
+        long failureCount = results.size() - successCount;
+        if (failureCount == 0) {
+            return "대상DB %d개 중 %d개 성공".formatted(results.size(), successCount);
+        }
+        return "대상DB %d개 중 %d개 성공, %d개 실패".formatted(results.size(), successCount, failureCount);
     }
 
     private static String shortMessage(Exception e) {

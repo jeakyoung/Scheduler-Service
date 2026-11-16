@@ -118,9 +118,9 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
 
         JsonNode node = objectMapper.readTree(response);
-        assertThat(node.get("displayOutput")).isNotNull();
-        assertThat(node.at("/displayOutput/rows/0/EMPLOYEE_NO").asText()).isEqualTo("E001");
-        assertThat(node.at("/displayOutput/rows/0/EA_TITLE").asText()).isEqualTo("Title A");
+        assertThat(node.get("displayOutputs")).hasSize(1);
+        assertThat(node.at("/displayOutputs/0/rows/0/EMPLOYEE_NO").asText()).isEqualTo("E001");
+        assertThat(node.at("/displayOutputs/0/rows/0/EA_TITLE").asText()).isEqualTo("Title A");
     }
 
     @Test
@@ -156,7 +156,7 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
 
         JsonNode node = objectMapper.readTree(response);
         assertThat(node.at("/result/status").asText()).isEqualTo("FAILURE");
-        assertThat(node.get("displayOutput").isNull()).isTrue();
+        assertThat(node.get("displayOutputs")).isEmpty();
 
         String lastResultResponse = mockMvc.perform(
                         org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/schedules/" + id + "/last-result"))
@@ -164,7 +164,7 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
                 .andReturn().getResponse().getContentAsString();
         JsonNode lastResultNode = objectMapper.readTree(lastResultResponse);
         assertThat(lastResultNode.at("/result/status").asText()).isEqualTo("FAILURE");
-        assertThat(lastResultNode.get("displayOutput").isNull()).isTrue();
+        assertThat(lastResultNode.get("displayOutputs")).isEmpty();
     }
 
     @Test

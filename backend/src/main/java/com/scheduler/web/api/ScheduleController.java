@@ -9,6 +9,7 @@ import com.scheduler.domain.schedule.ScheduleParameterRepository;
 import com.scheduler.domain.schedule.ScheduleRepository;
 import com.scheduler.engine.execution.ScheduleNotFoundException;
 import com.scheduler.engine.quartz.ScheduleRegistrar;
+import com.scheduler.engine.sp.SqlIdentifierValidator;
 import com.scheduler.web.api.dto.EnabledRequest;
 import com.scheduler.web.api.dto.ScheduleParameterResponse;
 import com.scheduler.web.api.dto.ScheduleRequest;
@@ -66,6 +67,7 @@ public class ScheduleController {
     public ScheduleResponse create(@Valid @RequestBody ScheduleRequest request, Authentication authentication) {
         String actionConfigJson = writeActionConfig(request.actionConfig());
         validateCron(request.cronExpression());
+        SqlIdentifierValidator.validate(request.spName());
         ActionConfigRequestValidator.validate(request.actionType(), actionConfigJson);
 
         ScheduleDefinition saved = scheduleRepository.save(new ScheduleDefinition(
@@ -82,6 +84,7 @@ public class ScheduleController {
         requireSchedule(id);
         String actionConfigJson = writeActionConfig(request.actionConfig());
         validateCron(request.cronExpression());
+        SqlIdentifierValidator.validate(request.spName());
         ActionConfigRequestValidator.validate(request.actionType(), actionConfigJson);
 
         ScheduleDefinition updated = scheduleRepository.update(new ScheduleDefinition(

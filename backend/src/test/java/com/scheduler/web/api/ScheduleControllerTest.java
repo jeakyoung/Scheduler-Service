@@ -88,6 +88,25 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
     }
 
     @Test
+    void createWithMaliciousSpNameIsBadRequest() throws Exception {
+        String body = """
+                {
+                  "name": "Injection attempt",
+                  "enabled": true,
+                  "cronExpression": "0 0 9 ? * MON",
+                  "timezone": "Asia/Seoul",
+                  "spName": "sp_test; DROP TABLE some_table; --",
+                  "targetDbConfigId": %d,
+                  "actionType": "DISPLAY_ONLY",
+                  "actionConfig": {"displayFormat": "TABLE"}
+                }
+                """.formatted(targetDbConfigId);
+
+        mockMvc.perform(post("/api/schedules").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void createWithMissingUrlForApiCallIsBadRequest() throws Exception {
         String body = """
                 {

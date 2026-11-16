@@ -238,3 +238,24 @@
 - `mvn clean package` 최종 재확인 성공. 컨테이너 정리 완료.
 - **DoD 점검**: `mvn test` 전체 그린(81/81). 레거시 3패턴 각각에 대응하는 시나리오 테스트 3개 존재 및 통과 — 둘 다 충족.
 - **TASKS.md T1~T14 전체 완료**(T15는 future, 범위 밖으로 명시돼 있어 착수하지 않음). 최종 상태: 백엔드(Spring Boot, REST API 전용, Quartz 동적 스케줄링, AES-256-GCM 비밀값 암호화, JWT stateless 인증) + 프론트엔드(React SPA, 8개 화면 전부 구현, 백엔드와 독립 배포) 전부 동작 확인, 비밀값 리터럴 0건, README에 재배포 체크리스트 존재. 다음 단계는 사용자 지시 대기(예: 실제 배포, 코드리뷰, 또는 T15 착수 여부 확인).
+
+## 2026-11-16 — sched-reviewer 복구 + 최종 리뷰 착수
+- (지난 금요일 사용량 한도로 중단 → 월요일 재개 사이에) sched-reviewer가 떠 있던 pane(w6:p6)의 Claude Code 세션이 완전히 유실됨(`claude --resume`으로 복구 불가 확인). 해당 pane에 `herdr agent start`로 새 Claude Code 세션을 띄워 sched-reviewer로 재등록(이전 대화 이력 없음 — 어차피 리뷰 작업을 받은 적 없어 손실 없음).
+- 같은 기간 sched-worker는 월간 사용량 한도로 금요일 12:41경 자동 중단됐다가, 한도 리셋 후 orchestrator가 재개 지시 → 커밋 안 돼있던 비밀번호변경 API 마무리(`c090bee`) → T12 React 8화면(`233ce5a`) → T13 비밀값 최종점검(`747f2f1`) → T14 테스트+레거시 3패턴 회귀(`643b01c`)까지 전부 완료, TASKS.md 전체(T1~T14) 종료.
+- orchestrator가 LOG.md 전체를 훑으며 미리 포착한 참고사항(리뷰어에게도 전달): T7 로그(132번째 줄 근처)에 "PLAN.md §5/§8의 cron 예시가 day-of-month에 `*`를 쓰는데, 이게 Quartz 고유 규칙(day-of-month/day-of-week 중 하나는 반드시 `?`)과 안 맞아 그대로 쓰면 깨진다"는 worker의 self-flag가 있음 — PLAN.md 문서 자체는 아직 고쳐지지 않은 상태(worker가 의도적으로 구현만 교정하고 문서는 건드리지 않음). 리뷰 결과에 포함시킬 것.
+- 다음 단계: (새로 복구된) sched-reviewer에게 전체 diff/코드 리뷰 지시 — 계획(PLAN.md) 부합 여부, 정확성, 보안(비밀값 하드코딩, 관리자 엔드포인트 인증, 동적 스케줄 입력값 검증 등), 결과는 `.team/REVIEW.md`에 작성하도록 지시.
+
+## 2026-11-16 — 1차 리뷰 완료, blocking 없음·Major 2건 수정 지시
+- sched-reviewer가 `.team/REVIEW.md` 작성 완료. **Blocking 없음.** PLAN.md가 약속한 핵심 경계(ExecutionResult/Sink 저장소 비의존, action_type 2종 모두 동작, SP 파라미터화, 비밀값 리터럴 0건(working tree+전체 git 히스토리), 관리자 엔드포인트 전부 인증 보호, JWT 서명키/암호화키 분리+만료처리)는 전부 코드 레벨에서 직접 확인되어 문제 없음.
+- **Major 2건(수정 필요)**:
+  1. **M1**: `StoredProcedureInvoker`(`engine/sp/StoredProcedureInvoker.java:28-31`)가 SP 파라미터는 `?` 바인딩하지만 **SP명(`spName`) 자체를 SQL 문자열에 그대로 이어붙임** — `sp_name`에 식별자 형식 검증/화이트리스트가 전혀 없어, 인증된 ADMIN이 `spName`에 `; DROP TABLE ...` 류를 넣으면 업체 업무DB(ERP 운영 DB일 수 있음)에서 임의 SQL 실행 가능. 인증된 관리자만 접근 가능한 경로라 외부 미인증 공격은 아니지만, 방어심층 결함으로 반드시 수정 필요.
+  2. **M2**: `Masking.lastFour`(`web/api/Masking.java:12-19`)가 **길이 4 이하 비밀값을 마스킹 없이 평문 그대로 반환**(레거시의 4자리 `FCM_SECURITY_CODE` 같은 실제 사례가 있었음) — `GET /api/config/credentials`/`target-db` 응답에서 짧은 비밀값이 그대로 노출됨. 테스트가 4자 이하 케이스를 커버하지 않아 놓쳤던 버그.
+- **Minor 3건(참고, 이번 라운드 선택적 수정)**: N1 `BodyTemplateRenderer`가 컬럼값을 JSON 이스케이프 없이 치환(다운스트림 바디 깨짐/필드주입 가능), N2 PLAN.md가 Quartz cron 고유규칙(day-of-month/day-of-week 중 하나는 `?`)을 문서화 안 함(orchestrator 사전 지적사항, 문서만의 문제), N3 `run-now`/`last-result`가 실패한 실행에도 이전 성공실행의 `DisplayOutput`을 그대로 붙여 반환(시점 불일치, UX 모호함).
+- 다음 단계: sched-worker에게 M1/M2(+가능하면 N1/N3)를 수정하고 재검증(DoD: 수정 전 재현했던 공격/버그가 더 이상 안 됨을 테스트로 확인)하도록 지시. sched-planner에게는 N2(cron 문서 보강)를 별도로 지시.
+
+## 2026-11-16 — REVIEW.md M1 수정: StoredProcedureInvoker SQL 인젝션 방지 (worker)
+- `engine/sp/SqlIdentifierValidator`(신규): SQL Server 식별자 화이트리스트(`^[A-Za-z0-9_.\[\]]+$`, 스키마 접두사/대괄호 허용) 정규식 검증. null/blank/세미콜론/공백/주석토큰 포함 값은 `IllegalArgumentException`(→ 기존 `ApiExceptionHandler`가 400으로 매핑).
+- **검증 위치 2곳**(REVIEW.md가 제안한 "둘 중 worker가 판단"에 대해 둘 다 적용 — 방어심층): (1) `web/api/ScheduleController`의 `create`/`update`에서 `request.spName()`을 `cron`/`action_config` 검증과 같은 자리에서 즉시 검증 → 관리자 API 레벨에서 바로 400으로 거부(이번 리뷰가 요구한 테스트 시나리오), (2) `engine/sp/StoredProcedureInvoker.invoke()` 맨 앞에서도 동일 검증 → 혹시 다른 경로(미래의 코드)로 유효성 검사를 거치지 않은 `ScheduleDefinition`이 흘러들어와도 실제 `EXEC` SQL 조립 직전에 다시 막힘.
+- 테스트: `SqlIdentifierValidatorTest`(정상 식별자/스키마접두사/대괄호 허용, null·blank·인젝션 페이로드 4종 거부) + `ScheduleControllerTest.createWithMaliciousSpNameIsBadRequest`(`spName: "sp_test; DROP TABLE some_table; --"`로 `POST /api/schedules` 시도 → 400 확인, REVIEW.md 재현 시나리오 그대로).
+- DoD 점검: `mvn test` 전체 86개 테스트 그린(기존 81 + 신규 5). `mvn clean package` 재확인 성공.
+- 다음 작업: M2(`Masking.lastFour` 4자 이하 평문노출 수정).

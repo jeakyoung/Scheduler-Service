@@ -25,6 +25,12 @@ public class StoredProcedureInvoker {
 
     public List<Map<String, Object>> invoke(String jdbcUrl, String username, String password,
                                               String spName, List<Object> boundParams) {
+        // sp_name can't be a JDBC bind parameter (there's no placeholder syntax for "which
+        // procedure to call"), so it's validated as a trusted identifier instead of being
+        // concatenated as-is - defense in depth even though callers (ScheduleController)
+        // already reject bad sp_name values at the API boundary.
+        SqlIdentifierValidator.validate(spName);
+
         String placeholders = boundParams.isEmpty()
                 ? ""
                 : " " + String.join(",", boundParams.stream().map(p -> "?").toArray(String[]::new));

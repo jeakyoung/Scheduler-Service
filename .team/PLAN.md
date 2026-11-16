@@ -193,7 +193,7 @@ interface ExecutionResultSink {
 | id | BIGINT PK | |
 | name | NVARCHAR(200) | 관리자 UI 표시용 |
 | enabled | BIT | false면 Quartz에 등록하지 않음/등록 해제 |
-| cron_expression | NVARCHAR(100) | 레거시 3종 고정주기 메서드를 대체하는 표준 cron (요일 포함 가능 — 별도 "주말 스킵" 필드 불필요) |
+| cron_expression | NVARCHAR(100) | 레거시 3종 고정주기 메서드를 대체하는 Quartz cron (요일 포함 가능 — 별도 "주말 스킵" 필드 불필요). **Quartz cron은 Unix cron과 문법이 다름** — day-of-month 필드와 day-of-week 필드 중 반드시 하나는 `?`로 둬야 함(둘 다 `*`나 둘 다 구체값이면 유효하지 않음) |
 | timezone | NVARCHAR(50) | 기본 `Asia/Seoul` |
 | sp_name | NVARCHAR(200) | 호출할 저장프로시저명 (레거시 `SP_WORK_LIMIT_LIST` 등에 해당, 리터럴 아님) |
 | target_db_config_id | BIGINT FK → target_db_config | SP를 실행할 대상 DB |
@@ -381,8 +381,8 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 |---|---|
 | `SchedulerContextListener.contextInitialized()`의 3개 `scheduleAtFixedRate` 리터럴 호출 | 기동 시 `schedule_definition`의 `enabled=true` 행 전체를 읽어 `ScheduleRegistrar`가 Quartz에 등록 + 관리자 CRUD가 호출하는 `scheduleJob/rescheduleJob/deleteJob` |
 | `DaySchedulerTask`/`HourSchedulerTask`/`PurchaseReqSchedulerTask` (3개 클래스, SP명/주기/바디구성이 클래스에 내재) | `GenericScheduleJob` 1개 + `ScheduleExecutor`. SP명/파라미터/cron/action_type/action_config는 모두 `schedule_definition`/`schedule_parameter` 행에서 로드 |
-| `calculateInitialDelayForNextMonday9AM()`/`calculateInitialDelayFor30Min()`/`calculateInitialDelayForDaily830AM()` | `CronTrigger` (표준 cron 표현식) — 요일 조건(토/일 제외)도 cron 자체로 표현, 별도 "주말 체크" 코드 불필요 |
-| Task `run()` 내부의 주말 체크(`DayOfWeek.SATURDAY/SUNDAY`면 return) | cron 표현식에 요일 포함(예: `MON-FRI`)으로 대체 — 런타임 분기 코드 제거 |
+| `calculateInitialDelayForNextMonday9AM()`/`calculateInitialDelayFor30Min()`/`calculateInitialDelayForDaily830AM()` | `CronTrigger` (Quartz cron 표현식) — 요일 조건(토/일 제외)도 cron 자체로 표현, 별도 "주말 체크" 코드 불필요. 단, Quartz cron은 day-of-month와 day-of-week 필드 중 하나를 반드시 `?`로 둬야 하는 Quartz 고유 문법(Unix cron과 다름)을 따른다 |
+| Task `run()` 내부의 주말 체크(`DayOfWeek.SATURDAY/SUNDAY`면 return) | cron 표현식에 요일 포함(예: `0 30 8 ? * MON-FRI` — day-of-month를 `?`로 둠)으로 대체 — 런타임 분기 코드 제거 |
 | `isTaskRunning` (static boolean, 클래스당 1개) | `@DisallowConcurrentExecution`(Quartz, 스케줄 1개당 자동 격리) — 수동실행(`run-now`)도 같은 `ScheduleExecutor` 경로를 타므로 "정규 실행 중 수동실행 요청" 충돌도 동일 가드로 처리 |
 | `executeTask1()`: `Class.forName` + `DriverManager.getConnection(Config.xxx)` + `EXEC SP_XXX` | `StoredProcedureInvoker` — 로직은 그대로, DB 접속정보는 `target_db_config`(복호화), SP명/파라미터는 `schedule_definition`/`schedule_parameter`에서 로드. **파라미터 없는 EXEC와 파라미터 있는 EXEC 모두 지원**(교정사항 #5) |
 | `executeTask2()`: 문자열 결합 JSON + `HttpURLConnection` POST + `SECURITY_CODE`/`X-Api-Key` 헤더 | `ApiCallActionHandler` + `GenericHttpClient` + `BodyTemplateRenderer` — 로직은 그대로(동일한 POST+커스텀헤더 개념), URL/헤더/바디 템플릿은 `action_config`(JSON)에서 로드, FCM 전용이 아니라 임의 API 호출 지원(교정사항 #2-a) |

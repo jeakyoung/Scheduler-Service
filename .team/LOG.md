@@ -278,3 +278,8 @@
 - 테스트: `ScheduleExecutionControllerTest.failedRunNowDoesNotReturnStaleDisplayOutputFromPriorSuccess` — ① `SP_TEST_SAMPLE`로 run-now 성공(스토어에 결과 적재) → ② 같은 프로시저를 `DROP`해서 그 다음 run-now가 SP 호출 단계에서 실제로 실패하게 만듦(목업 없이 실제 DB 상태 변화로 실패 유도) → ③ 응답의 `result.status=="FAILURE"`이면서 `displayOutput`이 `null`임을 확인, `GET last-result`도 동일하게 `null` 확인(REVIEW.md가 지적한 "run-now/last-result 둘 다" 범위 그대로).
 - DoD 점검: `mvn test` 전체 97개 테스트 그린(기존 96 + 신규 1). `mvn clean package` 재확인 성공.
 - **REVIEW.md M1/M2/N1/N3 전부 수정 완료**(N2는 문서 보강 사안으로 sched-planner 몫, worker 범위 아님). 각 이슈를 별도 커밋으로 분리: M1(`02fee04`), M2(`9298c10`), N1(`e113b68`), N3(커밋 예정).
+
+## 2026-11-16 — 2차 수정 라운드 종료, 리뷰 루프 완료
+- sched-planner가 N2(PLAN.md §4.1/§8에 Quartz cron day-of-month/day-of-week `?` 규칙 명시) 완료 → orchestrator가 해당 문서 변경 커밋(`c4479aa`, `.team` 문서 전용 변경이라 orchestrator가 직접 커밋).
+- 최종 상태: `mvn test` 97/97 그린, working tree clean, `main` 브랜치가 `origin/main` 대비 **22개 커밋 앞섬(미push)**. REVIEW.md가 지적한 Blocking 0 / Major 2(수정완료) / Minor 3(N1·N3 수정완료, N2 문서보강완료) 전부 해소됨.
+- 오케스트레이션 절차(researcher→planner→worker→reviewer, 중간 3회 사용자 직접 교정 반영) 1회 루프 종료. push 여부/추가 리뷰 라운드는 사용자 판단 대기.

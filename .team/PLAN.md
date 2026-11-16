@@ -31,6 +31,8 @@
 
 이 전제가 깨지는 명확한 신호(예: "하나의 운영 서버가 10개 업체를 동시에 서빙해야 한다")가 나오면 이 섹션을 다시 열어야 한다.
 
+> **2026-11-16 교정 — "스케줄당 대상DB 다중 선택" 기능과 §0의 관계**: 스케줄 1개가 등록된 `target_db_config` 중 여러 개를 선택해 동시에 같은 SP를 호출하도록 하는 기능(§4.3b, §6)을 추가했다. 이는 §0의 결론을 재론하는 것이 아니라, §0이 이미 명시적으로 허용해 둔 "같은 업체가 여러 개의 다운스트림 대상을 가질 수 있다"(위 근거 문단의 마지막 줄, `target_db_config`가 여러 행을 가질 수 있는 이유)는 범위를 "스케줄이 그 여러 대상 중 1개에만 고정"에서 "스케줄이 그중 여러 개를 동시에 선택"으로 확장한 것일 뿐이다. 여전히 "1프로세스 = 1배포 = 1업체"이고, 멀티테넌시(여러 업체를 동시에 서빙)와는 무관하다 — 한 업체 안에 여러 다운스트림 대상(예: 지점별 DB, 사업부별 DB)이 있고 하나의 스케줄이 그 여러 대상 모두에 같은 SP를 돌려야 하는 경우를 지원하는 것뿐이다.
+
 ---
 
 ## 1. 기술스택 최종 결정
@@ -76,12 +78,13 @@ Scheduler-Service/                         (레포 루트, git 루트)
 │  │  │  ├─ execution/                     ─ 저장소 비의존 핵심 (교정사항 #1, #3, #6)
 │  │  │  │  ├─ ScheduleExecutor.java       (Job과 수동실행 API가 공유하는 실행 진입점 — 레거시 run() 본문에 해당)
 │  │  │  │  ├─ TriggerType.java            (SCHEDULED | MANUAL)
-│  │  │  │  ├─ ExecutionResult.java        (값 객체: scheduleId, triggerType, startedAt, finishedAt, status, summary, errorMessage)
-│  │  │  │  ├─ ExecutionStatus.java        (SUCCESS | FAILURE)
+│  │  │  │  ├─ ExecutionResult.java        (값 객체: scheduleId, triggerType, startedAt, finishedAt, status, summary, errorMessage, **targetDbResults**(§3.1, 2026-11-16 신규))
+│  │  │  │  ├─ TargetDbExecutionResult.java (값 객체, 2026-11-16 신규 — §3.1b: targetDbConfigId/Name, status, summary, errorMessage)
+│  │  │  │  ├─ ExecutionStatus.java        (SUCCESS | PARTIAL_SUCCESS(2026-11-16 신규) | FAILURE)
 │  │  │  │  ├─ ExecutionResultSink.java    (포트 인터페이스: record(ExecutionResult))
 │  │  │  │  ├─ LoggingExecutionResultSink.java (현재 유일한 구현 — SLF4J 로그 출력. 추후 DB Sink로 교체/추가)
-│  │  │  │  ├─ DisplayOutput.java          (값 객체: 모드 b 결과물 — 컬럼/행, 생성시각)
-│  │  │  │  └─ DisplayOutputStore.java     (스케줄ID별 "마지막 표시결과"만 보관하는 인메모리 저장소 — 이력이 아니라 최신값 캐시)
+│  │  │  │  ├─ DisplayOutput.java          (값 객체: 모드 b 결과물 — scheduleId, **targetDbConfigId/Name**(2026-11-16 신규), 컬럼/행, 생성시각)
+│  │  │  │  └─ DisplayOutputStore.java     ((scheduleId, targetDbConfigId) 복합키별 "마지막 표시결과"만 보관하는 인메모리 저장소 — 이력이 아니라 최신값 캐시. getAllForSchedule(scheduleId) 추가(2026-11-16)
 │  │  │  │
 │  │  │  ├─ action/                        ─ 다운스트림 동작 2종 (교정사항 #2)
 │  │  │  │  ├─ ActionHandler.java          (인터페이스: handle(spResultRows, ScheduleDefinition) → ActionOutcome)
@@ -98,7 +101,7 @@ Scheduler-Service/                         (레포 루트, git 루트)
 │  │  │  │  ├─ ScheduleDefinition.java, ScheduleParameter.java
 │  │  │  │  ├─ ActionType.java            (API_CALL | DISPLAY_ONLY)
 │  │  │  │  ├─ GroupingMode.java           (PER_ROW | GROUP_BY)
-│  │  │  │  └─ ScheduleRepository.java (인터페이스) / ScheduleParameterRepository.java
+│  │  │  │  └─ ScheduleRepository.java (인터페이스) / ScheduleParameterRepository.java / ScheduleTargetDbConfigRepository.java (2026-11-16 신규 — §4.3b 조인 테이블, findByScheduleId/replaceForSchedule)
 │  │  │  ├─ config/
 │  │  │  │  ├─ TargetDbConfig.java, Credential.java
 │  │  │  │  └─ TargetDbConfigRepository.java / CredentialRepository.java
@@ -133,7 +136,7 @@ Scheduler-Service/                         (레포 루트, git 루트)
 └─ frontend/                                (React SPA, 백엔드와 별도 빌드/배포)
    ├─ src/
    │  ├─ pages/                             (§7 화면 목록에 1:1 대응 — Login, ScheduleList, ScheduleForm, RunResult, LastResult, TargetDbConfig, Credential, ChangePassword)
-   │  ├─ components/                        (공용 UI: 파라미터 편집기, 헤더/바디템플릿 에디터 등)
+   │  ├─ components/                        (공용 UI: 파라미터 편집기, 헤더/바디템플릿 에디터, **CronBuilder**(2026-11-16 신규 — §9의 6가지 구조화 입력 + "고급: 직접 cron 입력" 토글, cron↔구조화 양방향 변환 로직), **TargetDbConfigMultiSelect**(2026-11-16 신규) 등)
    │  ├─ api/                               (백엔드 REST 호출 클라이언트, baseURL = 환경변수로 주입)
    │  └─ App.tsx / 라우팅
    ├─ .env.example                          (API_BASE_URL 등 — 실제 값은 gitignore된 .env.local)
@@ -150,14 +153,35 @@ Scheduler-Service/                         (레포 루트, git 루트)
 
 ### 3.1 `ExecutionResult` (값 객체, 영속화 대상 아님 — 테이블 없음)
 
+**2026-11-16 교정 — 스케줄당 대상DB 다중 선택(§4.3b) 반영**: 스케줄 1회 실행이 이제 대상DB 1개가 아니라 N개를 순회하므로(§4.3b), `ExecutionResult`는 **전체 요약(top-level)** 과 **대상DB별 세부결과(`targetDbResults`)** 를 모두 담도록 확장한다. 기존 필드(scheduleId/triggerType/startedAt/finishedAt/summary/errorMessage)는 깨지 않고 `targetDbResults` 필드만 추가한다.
+
 | 필드 | 타입 | 설명 |
 |---|---|---|
 | scheduleId | Long | 어떤 스케줄 실행인지 |
 | triggerType | enum | `SCHEDULED`(Quartz 발화) \| `MANUAL`(관리자 "지금 실행") |
-| startedAt / finishedAt | Instant | 실행 구간 |
-| status | enum | `SUCCESS` \| `FAILURE` |
-| summary | String | **요약 수준만** — 예: "처리행 12건, API 호출 12/12 성공" / "SP 결과 5행 가공 완료". SP가 반환한 전체 행을 담지 않는다(교정사항 #6: 감시 서버, 백업 서버 아님) |
-| errorMessage | String (nullable) | 실패 시 예외 메시지(스택트레이스 전체 아님, 1~2줄 수준) — 교정사항 #3: 실패 상태를 지금 구조에 포함 |
+| startedAt / finishedAt | Instant | 실행 구간(전체 대상DB 순회 포함) |
+| status | enum | `SUCCESS`(대상DB 전부 성공) \| `PARTIAL_SUCCESS`(일부만 성공 — 신규 추가) \| `FAILURE`(전부 실패, 또는 대상DB에 도달하기 전 스케줄/엔진 레벨에서 실패) |
+| summary | String | **전체 요약** — 예: "대상DB 3개 중 2개 성공, 1개 실패". SP가 반환한 전체 행을 담지 않는다(교정사항 #6: 감시 서버, 백업 서버 아님) |
+| errorMessage | String (nullable) | **스케줄/엔진 레벨** 오류(예: 스케줄 정의 조회 실패)만 담는다 — 1~2줄 수준. 개별 대상DB의 오류는 `targetDbResults[i].errorMessage`에 담기고 여기엔 올라오지 않는다(교정사항 #3 원칙 유지) |
+| targetDbResults | `List<TargetDbExecutionResult>` | **신규** — 대상DB별 세부결과. 스케줄/엔진 레벨에서 실패해 대상DB 순회 자체를 시작 못 했으면 빈 리스트일 수 있다 |
+
+### 3.1b `TargetDbExecutionResult` (값 객체, 신규 — 대상DB별 세부결과)
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| targetDbConfigId | Long | 어느 `target_db_config`에 대한 실행인지 |
+| targetDbConfigName | String | 화면에 바로 쓸 수 있도록 이름을 같이 담아둔다(§4.3, 매 조회마다 `target_db_config`를 재조회하지 않아도 되게) |
+| status | enum | `SUCCESS` \| `FAILURE` (대상DB 1개 단위이므로 PARTIAL 없음) |
+| summary | String | 해당 대상DB에서의 처리 요약(예: "처리행 5건, API 호출 5/5 성공") — 전체 결과행 보존 금지 원칙은 여기도 동일 |
+| errorMessage | String (nullable) | 해당 대상DB 실행 실패 시 1~2줄 수준 에러 |
+
+**집계 규칙**: 대상DB N개 중 성공이 N개면 `SUCCESS`, 0개면 `FAILURE`, 둘 다 있으면 `PARTIAL_SUCCESS`.
+
+**부분실패 허용 결정(2026-11-16, 근거 명시)**: 대상DB 하나의 실행이 실패해도 나머지 대상DB는 **계속 진행**한다(허용). 근거: 한 업체(대상DB)의 DB 장애·SP 오류가 다른 업체에 대한 실행까지 막으면 안 된다 — 레거시도 애초에 "행 단위로 실패해도 나머지 행은 계속 FCM 발송" 패턴(`executeTask2`가 각 대상마다 개별 try 없이도 한 건의 HTTP 실패가 전체를 중단시키지 않는 구조)과 같은 정신이다. `ScheduleExecutor`는 대상DB별로 개별 try/catch를 두어, 한 대상DB의 `StoredProcedureInvoker`/`ActionHandler` 예외가 다른 대상DB 순회를 막지 않도록 구현한다.
+
+**실행 순서**: 대상DB는 **순차 실행**한다(병렬 아님) — 레거시도 애초에 각 Task가 자신의 단일 DB를 순차적으로 처리했고(동시성 이슈가 없었음), §0 전제(단일 프로세스, 소수의 다운스트림 대상)에서 병렬화로 얻는 이득보다 스레드풀 관리/부분실패 순서 보장의 단순성이 더 크다고 판단한다.
+
+**`ActionHandler`와의 경계**: `ActionHandler`/`ActionOutcome` 인터페이스 자체는 바뀌지 않는다 — `ScheduleExecutor`가 대상DB마다 `handler.handle(schedule, spResultRowsForThisTargetDb)`를 한 번씩 호출하고, 그 결과를 대상DB 식별 정보와 함께 `TargetDbExecutionResult`로 감싸는 책임을 진다. 즉 "여러 대상DB를 안다"는 지식은 `ScheduleExecutor`에만 있고, `ActionHandler` 구현체(`ApiCallActionHandler`/`DisplayOnlyActionHandler`)는 여전히 "대상DB 1개분의 SP 결과를 처리한다"는 좁은 책임만 가진다.
 
 ### 3.2 `ExecutionResultSink` (포트)
 
@@ -174,9 +198,11 @@ interface ExecutionResultSink {
 
 모드 (b)(외부 호출 없이 SP 결과를 웹에 표시)는 "실행 이력"이 아니라 **"지금 보여줄 화면 데이터"**이므로 별도로 다룬다.
 
-- `DisplayOutput`: 컬럼명 리스트 + 행 데이터(SP 결과를 그대로, 또는 스케줄 정의의 컬럼 선택에 따라 추려서) + 생성시각.
-- `DisplayOutputStore`: 스케줄ID별로 **가장 최근 1건만** 인메모리(`ConcurrentHashMap`)로 들고 있는 캐시. 이력이 아니라 "최신 상태 스냅샷"이므로 프로세스 재시작 시 사라져도 무방하다(다음 실행에서 다시 채워짐). 관리자 웹의 "최근 실행 결과" 화면과 수동실행 응답이 이 캐시를 읽는다.
-- 주의: SP가 매우 큰 결과셋을 반환하는 극단적 케이스에 대한 메모리 상한선(예: 최대 N행만 보관)은 구현 단계에서 결정하되, 기본 원칙(교정사항 #6, "전체 보존이 목적 아님")을 따른다.
+**2026-11-16 교정 — 대상DB별로 분리, 섞지 않음**: 스케줄 1개가 대상DB를 여러 개 가질 수 있게 되면서, `DisplayOutput`은 **대상DB 하나분의 결과만** 담도록 식별 정보를 추가한다. "대상DB를 섞어서 합치지 않는다"(§5) 원칙을 이 값 객체 수준에서 강제한다.
+
+- `DisplayOutput`: `scheduleId` + **`targetDbConfigId`/`targetDbConfigName`(신규)** + 컬럼명 리스트 + 행 데이터(해당 대상DB의 SP 결과를 그대로, 또는 스케줄 정의의 컬럼 선택에 따라 추려서) + 생성시각. 여러 대상DB의 행을 한 `DisplayOutput`에 합쳐 담지 않는다.
+- `DisplayOutputStore`: 키를 스케줄ID 단일값에서 **(scheduleId, targetDbConfigId) 복합키**로 바꾼다. 각 (스케줄, 대상DB) 조합별로 **가장 최근 1건만** 인메모리(`ConcurrentHashMap`)로 들고 있는 캐시 — "대상DB별 최신 상태 스냅샷". 스케줄 하나의 전체 조회용으로 `getAllForSchedule(scheduleId) -> List<DisplayOutput>`(해당 스케줄에 속한 모든 대상DB의 최신 건)를 추가 제공한다. 이력이 아니라 최신 스냅샷이므로 프로세스 재시작 시 사라져도 무방(다음 실행에서 다시 채워짐)한 원칙은 그대로다. 관리자 웹의 "최근 실행 결과" 화면(대상DB별 섹션 — §7)과 수동실행 응답이 이 캐시를 읽는다.
+- 주의: SP가 매우 큰 결과셋을 반환하는 극단적 케이스에 대한 메모리 상한선(예: 최대 N행만 보관, 대상DB별로 개별 적용)은 구현 단계에서 결정하되, 기본 원칙(교정사항 #6, "전체 보존이 목적 아님")을 따른다.
 
 ---
 
@@ -184,7 +210,7 @@ interface ExecutionResultSink {
 
 > **실행이력 테이블은 이번 라운드에 스키마를 만들지 않는다 (TBD).** 설계 시점에 §3의 `ExecutionResult`/감시-서버 원칙(교정사항 #6: 상태/요약만, 전체 결과행 보존 금지)을 따를 것.
 >
-> **적용 범위 명확화**: 아래 §4.1~4.6의 Flyway 마이그레이션은 **엔진 자신의 메타DB(스케줄 정의/설정/Quartz 상태 저장용)에만** 적용된다. `target_db_config`가 가리키는 **대상 업무 DB(SP가 실제로 존재하는 업체 DB)에는 Flyway가 전혀 적용되지 않는다** — 엔진은 그 DB에 대해 스키마 변경 권한도, DDL 실행 기능도 갖지 않는다(§9 참고).
+> **적용 범위 명확화**: 아래 §4.1~4.6의 Flyway 마이그레이션은 **엔진 자신의 메타DB(스케줄 정의/설정/Quartz 상태 저장용)에만** 적용된다. `target_db_config`가 가리키는 **대상 업무 DB(SP가 실제로 존재하는 업체 DB)에는 Flyway가 전혀 적용되지 않는다** — 엔진은 그 DB에 대해 스키마 변경 권한도, DDL 실행 기능도 갖지 않는다(§10 참고).
 >
 > **로컬 개발용 H2 fallback (2026-11-16 교정, 사용자 직접 확정)**: 백엔드 기동 시 `DB_URL` 환경변수가 설정되지 않으면 **메타DB를 H2(파일 기반 임베디드 DB)로 자동 fallback**해 `mvn spring-boot:run`만으로 로컬 기동이 가능하게 한다. **이 fallback은 메타DB(§4.1~4.6)에만 적용되고 로컬 개발 전용이다** — `target_db_config`가 가리키는 대상 업무 DB는 이 변경과 무관하게 항상 MSSQL 고정(§1)이며, 운영 환경은 지금처럼 `DB_URL`에 SQL Server를 지정해서 쓴다. Flyway 마이그레이션과 Quartz JDBC JobStore가 현재 SQL Server 전용 DDL(T-SQL, Quartz `tables_sqlServer.sql`)을 쓰고 있으므로, H2에서 기동하려면 H2용 마이그레이션/Quartz delegate를 별도로 구성해야 한다(구체적 구현 방식은 구현 시점에 결정).
 
@@ -198,12 +224,13 @@ interface ExecutionResultSink {
 | cron_expression | NVARCHAR(100) | 레거시 3종 고정주기 메서드를 대체하는 Quartz cron (요일 포함 가능 — 별도 "주말 스킵" 필드 불필요). **Quartz cron은 Unix cron과 문법이 다름** — day-of-month 필드와 day-of-week 필드 중 반드시 하나는 `?`로 둬야 함(둘 다 `*`나 둘 다 구체값이면 유효하지 않음) |
 | timezone | NVARCHAR(50) | 기본 `Asia/Seoul` |
 | sp_name | NVARCHAR(200) | 호출할 저장프로시저명 (레거시 `SP_WORK_LIMIT_LIST` 등에 해당, 리터럴 아님) |
-| target_db_config_id | BIGINT FK → target_db_config | SP를 실행할 대상 DB |
 | action_type | NVARCHAR(20) | `API_CALL` \| `DISPLAY_ONLY` (교정사항 #2) |
 | action_config | NVARCHAR(MAX) (JSON) | action_type에 따라 모양이 다른 설정. §5 참고 |
 | description | NVARCHAR(500) | nullable |
 | created_at / updated_at | DATETIME2 | |
 | updated_by | NVARCHAR(100) | 관리자 계정명 |
+
+> **2026-11-16 교정 — `target_db_config_id` 컬럼 제거**: 스케줄 1개가 대상DB 1개에 고정되던 단일 FK를 제거하고, 스케줄이 대상DB를 N개 선택할 수 있도록 N:M 조인 테이블(§4.3b `schedule_target_db_config`)로 옮겼다. 아직 운영 전이라 과거 데이터 마이그레이션 걱정 없이 컬럼을 바로 제거한다(과도기 호환 컬럼을 남기지 않음).
 
 ### 4.2 `schedule_parameter` — SP 파라미터 (교정사항 #5)
 
@@ -233,6 +260,17 @@ interface ExecutionResultSink {
 | created_at / updated_at | DATETIME2 | |
 
 단일 업체 전제(§0)이므로 보통 1~2행이면 충분하지만, 한 업체가 여러 대상 DB를 쓰는 경우(멀티테넌시 아님)를 위해 테이블로 둔다.
+
+### 4.3b `schedule_target_db_config` — 스케줄↔대상DB N:M (2026-11-16 신규)
+
+스케줄 1개가 등록된 `target_db_config` 중 여러 개를 선택해, 실행 시 선택된 대상DB 전부에 대해 같은 SP를 호출할 수 있게 하는 조인 테이블. §4.1의 `target_db_config_id` 단일 FK를 대체한다.
+
+| 컬럼 | 타입 | 설명 |
+|---|---|---|
+| schedule_id | BIGINT FK → schedule_definition | ON DELETE CASCADE(스케줄 삭제 시 연결도 같이 삭제) |
+| target_db_config_id | BIGINT FK → target_db_config | ON DELETE는 제한(사용 중인 `target_db_config` 삭제 차단 — §6의 기존 "사용 중인 schedule_definition 있으면 차단" 규칙이 이 조인 테이블 기준으로 재정의됨) |
+
+PK는 `(schedule_id, target_db_config_id)` 복합키(같은 대상DB를 같은 스케줄에 중복 선택하는 것을 DB 레벨에서 방지). **스케줄 생성/수정 시 최소 1개 이상의 대상DB가 선택되어야 한다**(API 레벨 검증, §6) — 0개인 상태는 허용하지 않는다.
 
 ### 4.4 `credential` — 다운스트림 API 호출에 쓰는 비밀값(헤더용 등)
 
@@ -298,6 +336,7 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 - `${COLUMN_NAME}` : SP 결과 행(또는 그룹의 첫 행/집계값)의 컬럼값으로 치환
 - `${cred:NAME}` : `credential` 테이블에서 실행 시점에 복호화해 치환 — 이 치환 결과는 `ExecutionResult.summary`/로그에 원문 그대로 남기지 않는다(비밀값 로그 유출 방지)
 - 이 모드는 FCM 한정이 아니라 **임의 URL/메서드/헤더/바디** — FCM 호출은 이 범용 구조의 한 사례일 뿐 하드코딩하지 않는다
+- **2026-11-16 교정**: `groupingMode`/`groupByField`는 **대상DB 1개의 SP 결과 안에서만** 적용된다. 스케줄이 대상DB를 여러 개 선택한 경우(§4.3b) 각 대상DB의 결과는 독립적으로 그룹핑·호출되며, 서로 다른 대상DB의 행을 하나의 그룹/호출로 합치지 않는다(§0 교정 문단, §3.1b 참고) — 어느 업체 데이터인지 불분명해지는 것을 막기 위함
 
 ### `action_type = DISPLAY_ONLY`
 
@@ -310,6 +349,7 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 
 - `columns`가 없으면 SP가 반환한 모든 컬럼을 표시
 - 외부 호출 없음 — `DisplayOnlyActionHandler`가 SP 결과를 `DisplayOutput`으로 변환해 `DisplayOutputStore`에 적재하는 것으로 끝
+- **2026-11-16 교정**: 대상DB를 여러 개 선택한 스케줄이면 대상DB별로 별도의 `DisplayOutput`이 생성·적재된다(§3.3) — 여러 대상DB의 행을 하나의 `DisplayOutput`으로 합치지 않는다
 
 ---
 
@@ -327,19 +367,19 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 ### 스케줄 CRUD + 파라미터
 | Method | Path | 설명 |
 |---|---|---|
-| GET | /api/schedules | 목록 (enabled, 다음 실행시각 등 포함) |
-| GET | /api/schedules/{id} | 단건 조회(파라미터 포함) |
-| POST | /api/schedules | 생성 → 즉시 Quartz 등록(enabled=true인 경우) |
-| PUT | /api/schedules/{id} | 수정 → cancel 후 재등록(cron/파라미터/action_config 변경 반영) |
-| DELETE | /api/schedules/{id} | 삭제 → Quartz 등록 해제 |
+| GET | /api/schedules | 목록 (enabled, 다음 실행시각, **`targetDbConfigs: [{id, name}]`**(2026-11-16 신규 — 어느 대상DB들을 포함하는지, §7 ScheduleList 표시용) 등 포함) |
+| GET | /api/schedules/{id} | 단건 조회(파라미터 포함, **`targetDbConfigIds`**/`targetDbConfigs` 포함) |
+| POST | /api/schedules | 생성 → 즉시 Quartz 등록(enabled=true인 경우). **`targetDbConfigIds: number[]`**(2026-11-16, 기존 단수 `targetDbConfigId` 폐지) — 최소 1개 이상 필수, 0개면 400 |
+| PUT | /api/schedules/{id} | 수정 → cancel 후 재등록(cron/파라미터/action_config/**`targetDbConfigIds`** 변경 반영) — `targetDbConfigIds`도 같은 요청 바디에서 통째 교체(전체 배열을 다시 보냄, §4.3b 조인 테이블을 해당 스케줄 기준으로 전량 교체) |
+| DELETE | /api/schedules/{id} | 삭제 → Quartz 등록 해제, `schedule_target_db_config` 연결도 CASCADE로 함께 삭제 |
 | PATCH | /api/schedules/{id}/enabled | 활성/비활성 토글 → Quartz add/remove |
 | PUT | /api/schedules/{id}/parameters | 파라미터 목록 전체 교체(단순화를 위해 개별 CRUD 대신 통째 교체) |
 
 ### 실행 (교정사항 #4)
 | Method | Path | 설명 |
 |---|---|---|
-| POST | /api/schedules/{id}/run-now | **즉시실행**. 정규 스케줄과 무관하게 1회 실행하고 `ExecutionResult`(+ `DISPLAY_ONLY`면 `DisplayOutput`)를 응답 바디로 동기 반환. 이미 실행 중이면 중복 실행 거부 응답(상태코드로 구분) |
-| GET | /api/schedules/{id}/last-result | `DisplayOutputStore`/마지막 `ExecutionResult`의 인메모리 캐시 조회(영속 이력 아님 — 프로세스 기동 이후 최신 1건) |
+| POST | /api/schedules/{id}/run-now | **즉시실행**. 정규 스케줄과 무관하게 1회 실행하고 `ExecutionResult`(전체 요약 + **`targetDbResults: TargetDbExecutionResult[]`**, 2026-11-16 확장 — §3.1/§3.1b)를 응답 바디로 동기 반환. `DISPLAY_ONLY`면 대상DB별 `DisplayOutput`도 함께 포함(대상DB별로 섞지 않고 분리된 배열로). 이미 실행 중이면 중복 실행 거부 응답(상태코드로 구분) |
+| GET | /api/schedules/{id}/last-result | `DisplayOutputStore.getAllForSchedule(id)`/마지막 `ExecutionResult`의 인메모리 캐시 조회(영속 이력 아님 — 프로세스 기동 이후 최신 1건). **2026-11-16**: 응답이 대상DB별로 그룹화된 배열을 담는다(§7 LastResult 화면이 대상DB별 섹션으로 렌더링) |
 | GET | /api/schedules/{id}/status | Quartz 기준 다음 실행 예정 시각, 현재 실행중 여부 |
 
 ### 대상 DB 설정
@@ -348,7 +388,7 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 | GET | /api/config/target-db | 목록(비밀번호 마스킹) |
 | POST | /api/config/target-db | 생성(비밀번호 암호화 저장) |
 | PUT | /api/config/target-db/{id} | 수정 |
-| DELETE | /api/config/target-db/{id} | 삭제(사용 중인 schedule_definition 있으면 차단) |
+| DELETE | /api/config/target-db/{id} | 삭제(`schedule_target_db_config`에서 참조 중이면 차단 — 2026-11-16, 기존 단일 FK 참조에서 N:M 조인 테이블 참조로 변경) |
 
 ### 자격증명(Credential)
 | Method | Path | 설명 |
@@ -362,15 +402,15 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 
 ## 7. 화면 목록 (관리자 웹, React SPA — 백엔드와 별도 앱)
 
-화면 자체의 목록·내용은 교정 전과 동일하고, 구현 기술만 Thymeleaf 서버 렌더링 → React 컴포넌트/페이지로 바뀐다. 각 페이지는 `frontend/src/api/` 클라이언트를 통해서만 백엔드 `/api/**`를 호출한다(페이지가 직접 DB/Quartz를 알지 못함).
+화면 목록(8개)은 교정 전과 동일하고, 구현 기술은 Thymeleaf 서버 렌더링 → React 컴포넌트/페이지로 바뀌었다(3차 교정). 각 페이지는 `frontend/src/api/` 클라이언트를 통해서만 백엔드 `/api/**`를 호출한다(페이지가 직접 DB/Quartz를 알지 못함). **2026-11-16 교정**: ScheduleList/ScheduleForm/RunResult/LastResult 4개 페이지는 아래처럼 대상DB 다중선택·구조화 cron 입력·대상DB별 섹션 표시가 추가되어 내용이 확장됐다(화면 "목록" 자체는 그대로, 각 화면의 "내용"은 변경됨).
 
 1. **Login 페이지** — 로그인 폼 → `/api/auth/login` 호출, 인증 토큰/세션 저장
-2. **ScheduleList 페이지** — 스케줄 목록 테이블: enabled 토글, cron, 다음 실행 예정시각, 마지막 실행 상태(성공/실패 뱃지 — 인메모리 캐시 기반, "이력 아님" 명시), "지금 실행" 버튼
-3. **ScheduleForm 페이지** — 생성/수정 공용: 기본정보(이름/cron/timezone/대상DB/SP명) + 파라미터 편집기 컴포넌트(행 추가/삭제, 이름/타입/값소스/리터럴값) + `action_type` 선택에 따라 폼 영역이 동적으로 전환되는 컴포넌트:
-   - `API_CALL` 선택 시: method/url/headers(키-값 추가, 값에 `${cred:NAME}` 선택 가능하도록 credential 목록 드롭다운 제공)/groupingMode/groupByField/bodyTemplate(placeholder 안내 포함)
+2. **ScheduleList 페이지** — 스케줄 목록 테이블: enabled 토글, cron(사람이 읽을 수 있는 요약 문구 — 아래 §9 참고 — 와 원본 cron 둘 다), 다음 실행 예정시각, 마지막 실행 상태(전체 요약 뱃지: 성공/부분성공/실패 — 인메모리 캐시 기반, "이력 아님" 명시), **포함된 대상DB 이름 목록(2026-11-16 신규 — `target_db_config.name`을 배지/칩 형태로 나열, §4.3b)**, "지금 실행" 버튼
+3. **ScheduleForm 페이지** — 생성/수정 공용: 기본정보(이름/timezone/SP명) + **반복주기 입력(2026-11-16 신규 — §9의 구조화 cron 빌더, cron 텍스트 입력을 대체)** + **대상 DB 다중 선택(2026-11-16 신규 — 체크박스/멀티셀렉트, 최소 1개 이상 필수, §4.3b)** + 파라미터 편집기 컴포넌트(행 추가/삭제, 이름/타입/값소스/리터럴값) + `action_type` 선택에 따라 폼 영역이 동적으로 전환되는 컴포넌트:
+   - `API_CALL` 선택 시: method/url/headers(키-값 추가, 값에 `${cred:NAME}` 선택 가능하도록 credential 목록 드롭다운 제공)/groupingMode/groupByField/bodyTemplate(placeholder 안내 포함) — groupingMode/groupByField는 선택된 대상DB 각각의 결과 안에서만 적용됨을 폼에 안내 문구로 표시
    - `DISPLAY_ONLY` 선택 시: displayFormat/columns 선택
-4. **RunResult 컴포넌트/모달** — "지금 실행" 클릭 시 `/api/schedules/{id}/run-now` 응답(성공/실패, summary, errorMessage, `DISPLAY_ONLY`면 표/텍스트 결과)을 같은 화면에서 모달 또는 인라인으로 바로 표시
-5. **LastResult 페이지** — 스케줄별 `last-result` 조회(= `DisplayOutputStore`/`ExecutionResult` 캐시 열람, 영속 이력이 아니라는 안내 문구 포함)
+4. **RunResult 컴포넌트/모달** — "지금 실행" 클릭 시 `/api/schedules/{id}/run-now` 응답을 같은 화면에서 모달 또는 인라인으로 바로 표시. **2026-11-16 변경**: 상단에 전체 요약(성공/부분성공/실패, 대상DB N개 중 M개 성공)을 먼저 보여주고, 그 아래 **대상DB(`target_db_config.name`)별로 섹션을 나눠** 각 섹션에 해당 대상DB의 summary/errorMessage/(DISPLAY_ONLY면) 표 결과를 표시 — 대상DB 데이터를 하나로 합쳐 보여주지 않는다
+5. **LastResult 페이지** — 스케줄별 `last-result` 조회(= `DisplayOutputStore`/`ExecutionResult` 캐시 열람, 영속 이력이 아니라는 안내 문구 포함). **2026-11-16 변경**: RunResult와 동일하게 전체 요약 + **대상DB별 섹션 구분**으로 렌더링
 6. **TargetDbConfig 페이지** — 대상 DB 설정 목록/생성/수정/삭제, 비밀번호 마스킹
 7. **Credential 페이지** — 자격증명 목록/생성/수정/삭제, 값 마스킹
 8. **ChangePassword 페이지** (본인 계정) — 최소 수준의 계정 관리, 복잡한 계정 관리 화면은 범위 밖(§0: 단일 역할)
@@ -393,10 +433,53 @@ Quartz 공식 SQL Server DDL 스크립트를 Flyway 마이그레이션으로 그
 | (레거시에는 없음 — 수동 실행 불가, 재배포/재시작만 가능) | `POST /api/schedules/{id}/run-now` — 즉시실행 + 동기 결과 반환(교정사항 #4) |
 | `Config.java`의 6개 상수(DB url/user/pw, FCM url/securityCode/apiKey) + 주석 스왑 재컴파일 | 부트스트랩 비밀값(메타DB 접속정보, 마스터키) = 환경변수 / 운영 비밀값(`target_db_config`, `credential`) = 관리자 웹 CRUD + DB 암호화 저장, 재시작 없이 반영 |
 | (레거시에는 없음 — 인증 없는 WAR 배포) | Spring Security 세션 로그인(`admin_user`) |
+| (레거시에는 없음 — 각 Task가 `Config.getDbUrl()` 단일 DB에 고정) | 스케줄당 대상DB 다중 선택(`schedule_target_db_config` N:M, §4.3b) — 대상DB별로 SP 호출/액션을 독립 수행, 부분실패 허용(2026-11-16 신규, 교정사항) |
+| (레거시에는 없음 — cron 문법을 코드로 직접 작성) | 구조화 입력(년/월/일/시/분/요일/간격) → Quartz cron 변환 UI(§9, 2026-11-16 신규) |
 
 ---
 
-## 9. 범위 밖 (이번 라운드에서 하지 않는 것)
+## 9. 반복주기 구조화 입력 → Quartz cron 변환 설계 (2026-11-16 신규)
+
+관리자가 Quartz cron 문법을 몰라도 스케줄 주기를 등록할 수 있도록, 년/월/일/시/분을 구조화된 입력으로 받아 cron으로 변환한다. **DB의 `cron_expression` 컬럼에는 항상 유효한 Quartz cron 문자열만 저장된다** — 구조화 입력은 그 문자열을 만들어내는 UI 계층일 뿐, 스키마 변경은 없다(§4.1 `cron_expression` 컬럼 그대로).
+
+### 9.1 어디서 변환할 것인가 (결정)
+
+**구조화 입력 ↔ cron 변환(양방향)은 프론트엔드(TypeScript)에서 수행한다.** 백엔드는 지금처럼 최종 저장 시 Quartz `CronExpression.isValidExpression`으로 **검증만** 한다(기존 T8 범위 그대로, 변경 없음).
+
+근거:
+- 아래 6가지 패턴은 cron 필드 위치가 고정된 **결정적(deterministic) 문자열 생성**이라 Quartz 라이브러리 없이도 TS로 정확히 만들 수 있다(파싱이 필요한 임의 cron 해석이 아니라, 우리가 정의한 좁은 패턴 집합의 생성/역생성이므로).
+- 매 입력 변경마다 백엔드 왕복을 요구하면(예: 키 입력마다 호출) UX가 나빠진다. 생성 로직을 프론트에 두면 즉시 미리보기(생성된 cron, 다음 실행 예시)를 보여줄 수 있다.
+- 다만 "프론트가 만든 cron이 실제로 유효한 Quartz cron인가"는 **백엔드가 여전히 최종 검증**하므로(기존 `CronExpression.isValidExpression` 유지), 프론트 로직에 버그가 있어도 잘못된 cron이 DB에 저장되는 일은 없다 — 이 이중 체크가 프론트/백엔드 cron 로직 drift 위험의 안전망이다.
+- 대안으로 "백엔드에 변환 엔드포인트(`/api/schedules/cron/build`)를 두는 안"도 고려했으나, 생성 규칙이 결정적이라 추가 API 왕복이 주는 이득이 적고, 이 프로젝트 규모(§0)에서 불필요한 엔드포인트 증가로 판단해 기각했다.
+
+### 9.2 지원하는 6가지 반복 유형과 cron 생성 규칙
+
+Quartz cron 필드 순서: `초 분 시 일(day-of-month) 월 요일(day-of-week) [년(선택)]`. day-of-month/day-of-week 중 하나는 반드시 `?`(§4.1/§8의 Quartz 고유 규칙).
+
+| # | 유형 | 입력 필드 | 생성 규칙(예) |
+|---|---|---|---|
+| 1 | 일별 | 시(HH), 분(mm) | `0 {mm} {HH} * * ?` |
+| 2 | 월별 | 일(1~31), 시, 분 | `0 {mm} {HH} {일} * ?` |
+| 3 | 년별 | 월(1~12), 일, 시, 분 | `0 {mm} {HH} {일} {월} ?` |
+| 4 | 요일반복 | 요일 다중선택(MON..SUN), 시, 분 | `0 {mm} {HH} ? * {MON,WED,FRI 등 콤마결합}` |
+| 5 | 간격반복 | 시작시각 HH:mm, 종료시각 HH:mm, 간격값 N, 간격단위(분/시간), 요일 필터(선택, 기본 전체 요일) | 분 단위: `0 {시작분}/{N} {시작시}-{종료시} ? * {요일}`. 시간 단위: `0 {시작분} {시작시}-{종료시}/{N} ? * {요일}` — 레거시 `HourSchedulerTask`(평일 매시 정각·30분) 패턴과 동일 개념 |
+| 6 | 1회성 특정일시 | 연-월-일, 시, 분 | `0 {mm} {HH} {일} {월} ? {연}` — Quartz cron의 선택적 7번째 "년" 필드를 사용해 그 해/월/일/시각에 **단 1회만** 매칭되게 함(반복 없음) |
+
+**1회성(#6) 관련 유의점**: 해당 연-월-일시가 지나면 트리거는 다시는 발화하지 않는다(Quartz가 년 필드로 자연스럽게 처리) — 레거시에 없던 신규 기능이며 별도의 "반복 안 함" 플래그 컬럼 없이 cron 자체로 표현된다. `enabled`를 자동으로 false로 되돌릴지는 구현 단계에서 결정(관리자가 "이미 지나간 1회성 스케줄"을 목록에서 구분해 볼 수 있어야 UX상 혼란이 없다 — §7 ScheduleList 화면에 반영 여지를 남겨둠).
+
+**간격반복(#5) 관련 유의점**: 분 단위 간격은 `시작분/N` + `시작시-종료시` 조합(Quartz는 범위와 증분을 함께 쓰는 `a-b/c` 문법을 지원)을 쓴다. 분/시간 조합이 정확히 맞아떨어지지 않는 경계 케이스(예: 종료시각의 분이 간격과 어긋나는 경우)가 있을 수 있으므로, 구현 시 단위 테스트로 경계값을 검증할 것(TASKS.md 해당 작업의 DoD에 포함).
+
+### 9.3 수정(edit) 시 역변환 — "고급: 직접 cron 입력"으로 폴백
+
+기존 스케줄을 수정할 때, 저장된 `cron_expression` 문자열을 위 6가지 생성 규칙의 "역" 정규식으로 매칭을 시도한다(생성 규칙이 결정적이므로 역방향도 결정적 패턴 매칭으로 가능 — 예: `0 \d+ \d+ \* \* \?` 형태면 "일별", `0 \d+ \d+ \? \* [A-Z,\-]+` 형태면 "요일반복" 등).
+
+- **매칭되면**: 해당 유형의 구조화 폼을 그 값으로 복원해서 보여준다.
+- **매칭되지 않으면**(레거시 임포트, 수동 DB 편집, 6가지 패턴 밖의 임의 cron 등): **"고급: 직접 cron 입력" 모드**로 폴백한다 — cron 텍스트 입력창(현재 `ScheduleFormPage.tsx`에 이미 있는 그 입력 방식)을 그대로 보여주고 원본 cron 값을 채워 넣는다. **이 모드는 항상 선택 가능하게 남겨둔다**(구조화 폼과 토글 전환 가능) — 완전히 막지 않는다는 요구사항을 그대로 반영.
+- 저장 시 어느 모드든 최종적으로 문자열 하나(cron)가 되고, 백엔드는 그 문자열만 보고 검증한다 — 백엔드 입장에서 "구조화 모드로 만들었는지 고급 모드로 직접 썼는지"는 구분하지 않는다(별도 컬럼 없음, §4.1 그대로).
+
+---
+
+## 10. 범위 밖 (이번 라운드에서 하지 않는 것)
 
 - 실행이력(로그) 테이블 스키마/마이그레이션 설계 — TBD, 추후 별도 라운드
 - 실패 기록의 영속화 — `ExecutionResult`에 실패 상태/에러메시지는 포함하되 저장은 하지 않음

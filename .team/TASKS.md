@@ -2,8 +2,9 @@
 
 > `.team/PLAN.md` 기준. 순서대로 구현한다(각 작업은 원칙적으로 앞 작업의 결과물 위에 쌓임).
 > 레거시(`C:\Users\USER\Desktop\scheduler-test\scheduler-test`)는 참고만 하고 수정하지 않는다.
-> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T15)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
+> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T22)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
 > **2026-11-13 3차 교정(사용자 직접 지시) 반영**: 관리자 화면은 Thymeleaf가 아니라 별도 React SPA(`frontend/`)로 구현한다. 백엔드(`backend/`)는 REST API만 제공한다. 이에 따라 레포를 `backend/`/`frontend/` 두 디렉터리로 분리하는 작업(T1)과 프론트엔드 스캐폴딩+CORS 연동(T2)을 별도 작업으로 추가했다.
+> **2026-11-16 교정(사용자 직접 지시) 반영**: PLAN.md에 3가지 신규 기능 — (1) 알람식 반복주기 입력 UI(§9), (2) 스케줄당 대상DB 다중 선택(§4.3b), (3) 대상DB별 모아보기(§7) — 가 추가됨에 따라, T1~T14(기존 범위) 뒤에 T15~T21을 이어서 추가한다. 스키마 변경(T15) → 도메인/엔진(T16~T17) → API(T18) → 프론트(T19~T20) → 회귀테스트(T21) 순서. 기존 future task(실행이력 테이블)는 T22로 밀렸다.
 
 ---
 
@@ -163,10 +164,92 @@
 
 ---
 
+### T15. 메타DB 마이그레이션 — 스케줄↔대상DB N:M 전환 (PLAN.md §4.3b)
+
+- SQL Server/H2 양쪽에 Flyway `V3__schedule_target_db_multi.sql` 추가: `schedule_target_db_config(schedule_id, target_db_config_id)` 생성(PK 복합키, `schedule_id`는 `ON DELETE CASCADE`), `schedule_definition.target_db_config_id` 컬럼과 그 FK 제약을 제거.
+- 아직 운영 전이므로 과거 데이터 백필은 불필요(PLAN.md §4.1 교정 문단) — 다만 로컬/테스트 환경에 시드 데이터가 있다면 마이그레이션 전/후로 테스트가 깨지지 않는지 확인.
+- T3에서 만든 기존 `V1__schedule_core.sql`은 수정하지 않는다(Flyway는 적용된 마이그레이션을 수정하지 않는 것이 원칙 — 새 버전 파일로 추가).
+
+**DoD**: SQL Server/H2 양쪽에서 `V1 → V2 → V3` 순서로 깨끗하게 마이그레이션 적용됨(기존 DB 기준 `flyway:migrate` 1회 그린). `schedule_definition`에 더 이상 `target_db_config_id` 컬럼이 없음을 확인. `schedule_target_db_config`에 같은 (schedule_id, target_db_config_id) 중복 삽입 시 PK 위반으로 거부됨을 테스트로 확인.
+
+---
+
+### T16. 도메인/Repository 변경 — `ScheduleTargetDbConfigRepository` + `ScheduleDefinition` 정리
+
+- `domain/schedule/ScheduleDefinition.java`에서 `targetDbConfigId` 필드 제거(§4.1 컬럼 제거에 대응 — 레코드가 더 이상 존재하지 않는 컬럼을 참조하지 않게).
+- 신규 `domain/schedule/ScheduleTargetDbConfigRepository` 인터페이스: `findTargetDbConfigIdsByScheduleId(scheduleId) -> List<Long>`, `replaceForSchedule(scheduleId, List<Long> targetDbConfigIds)`(해당 스케줄의 기존 연결을 전량 삭제 후 재삽입 — 트랜잭션 1건).
+- `infra/persistence/jdbc`에 `JdbcScheduleTargetDbConfigRepository` 구현, 기존 `JdbcScheduleRepository`에서 `target_db_config_id` 매핑 코드 제거.
+- `replaceForSchedule`이 존재하지 않는 `target_db_config_id`를 참조하면 FK 위반으로 명확히 실패하도록(그대로 전파하거나 명시적 예외로 감싸기는 T18에서 API 레벨 400으로 변환).
+
+**DoD**: Repository 테스트로 (1) `replaceForSchedule`이 기존 연결을 덮어쓰기(추가/삭제 모두) 정확히 반영, (2) 스케줄 삭제 시 `schedule_target_db_config` 행이 CASCADE로 같이 삭제, (3) 존재하지 않는 `target_db_config_id`로 연결 시도 시 실패함을 확인.
+
+---
+
+### T17. 실행 엔진 변경 — `ScheduleExecutor` 대상DB 다중 순회 + `ExecutionResult`/`TargetDbExecutionResult`/`DisplayOutput` 확장 (PLAN.md §3.1/§3.1b/§3.3)
+
+1. `ExecutionStatus`에 `PARTIAL_SUCCESS` 추가.
+2. 신규 `engine/execution/TargetDbExecutionResult` 값 객체(targetDbConfigId/Name, status, summary, errorMessage).
+3. `ExecutionResult`에 `targetDbResults: List<TargetDbExecutionResult>` 필드 추가(기존 필드는 유지, 의미는 "전체 요약"으로 재해석 — PLAN.md §3.1 집계 규칙: 전부 성공 SUCCESS, 전부 실패 FAILURE, 혼재 PARTIAL_SUCCESS).
+4. `DisplayOutput`에 `targetDbConfigId`/`targetDbConfigName` 필드 추가. `DisplayOutputStore`의 키를 `scheduleId` 단일값 → `(scheduleId, targetDbConfigId)` 복합키로 변경, `getAllForSchedule(scheduleId) -> List<DisplayOutput>` 추가.
+5. `ScheduleExecutor.doExecute()`를 재작성: `ScheduleTargetDbConfigRepository`로 대상DB id 목록을 조회 → **순차 순회**(PLAN.md §3.1b "병렬 아님" 결정) → 대상DB마다 개별 try/catch로 감싸 `StoredProcedureInvoker.invoke(...)` + (변경 없는) `ActionHandler.handle(schedule, spResultRowsForThisTargetDb)` 호출 → 결과를 `TargetDbExecutionResult`로 변환(실패 시 해당 대상DB만 FAILURE로 기록하고 다음 대상DB로 계속 — 부분실패 허용, PLAN.md §3.1b 근거) → `DISPLAY_ONLY`면 `DisplayOutput`에 대상DB 식별정보를 태그해 `DisplayOutputStore`에 적재 → 전체 루프 종료 후 집계 규칙대로 상위 `ExecutionResult` 구성.
+6. `ActionHandler`/`ActionOutcome` 인터페이스 자체는 변경하지 않는다(PLAN.md §3.1b "ActionHandler와의 경계" — 대상DB를 아는 책임은 `ScheduleExecutor`에만 둠).
+
+**DoD**:
+- 통합 테스트로 (1) 대상DB 전부 성공 → `SUCCESS`, (2) 일부 성공/일부 실패(예: 2개 중 1개가 잘못된 접속정보) → `PARTIAL_SUCCESS`이고 실패한 대상DB만 `targetDbResults`에서 FAILURE로 표시, (3) 전부 실패 → `FAILURE`.
+- 한 대상DB의 `StoredProcedureInvoker` 예외가 다른 대상DB 순회를 막지 않음을 테스트로 확인(나머지 대상DB가 실제로 호출됐는지 mock 호출 횟수로 검증).
+- `DISPLAY_ONLY` 스케줄이 대상DB 2개를 가질 때 `DisplayOutputStore.getAllForSchedule(id)`가 서로 다른 행 데이터를 가진 2건의 `DisplayOutput`을 반환하고, 어느 한쪽 데이터가 다른 쪽과 섞이지 않음을 확인.
+- `credential` 복호화 값이 `targetDbResults[i].summary`/`errorMessage`/로그에 노출되지 않음을 확인(기존 T6 DoD의 연장).
+
+---
+
+### T18. 관리자 REST API 변경 — `targetDbConfigIds` 배열 계약 + run-now/last-result 응답 재구성 (PLAN.md §6)
+
+- `ScheduleController`의 생성/수정 요청 바디를 `targetDbConfigId`(단수) → `targetDbConfigIds: Long[]`(복수)로 변경. 빈 배열이면 400, 존재하지 않는 id가 섞여 있으면 400.
+- 목록/단건 조회 응답에 `targetDbConfigIds`와 이름까지 해석한 `targetDbConfigs: [{id, name}]`을 포함(프론트가 N+1 조회 없이 바로 배지를 그릴 수 있게 — PLAN.md §7 ScheduleList).
+- 수정 시 `targetDbConfigIds`를 T16의 `replaceForSchedule`로 전량 교체.
+- `ScheduleExecutionController`: `run-now` 응답에 `targetDbResults` 포함(T17 그대로 직렬화), `last-result` 응답을 대상DB별로 그룹화된 배열 형태로 재구성.
+- `TargetDbConfigController`의 삭제 차단 조건을 `schedule_definition.target_db_config_id` 참조 체크에서 `schedule_target_db_config` 참조 체크로 변경.
+
+**DoD**: API 테스트로 (1) 빈 배열/존재하지 않는 id로 생성·수정 시 400, (2) 정상 생성 후 목록 조회 응답에 `targetDbConfigs` 이름이 올바르게 채워짐, (3) `run-now` 응답이 T17에서 검증한 전체요약+대상DB별 세부결과 구조와 일치, (4) 대상DB 삭제가 참조 중인 스케줄이 있으면 차단됨을 확인.
+
+---
+
+### T19. 프론트엔드 — 반복주기 구조화 입력(`CronBuilder`) 구현 (PLAN.md §9)
+
+- `frontend/src/components/CronBuilder.tsx`: §9.2의 6가지 패턴(일별/월별/년별/요일반복/간격반복/1회성) 각각의 입력 폼 + 각 폼에서 Quartz cron 문자열을 생성하는 순수 TS 함수.
+- 역변환 함수: 임의 cron 문자열을 6가지 생성 규칙의 "역" 패턴과 매칭해 구조화 값으로 복원하거나, 매칭 실패 시 `null`(= CUSTOM) 반환.
+- "고급: 직접 cron 입력" 토글 — 기존 `ScheduleFormPage.tsx`의 cron 텍스트 입력을 이 모드로 유지(완전히 막지 않음, PLAN.md §9.3).
+- `ScheduleFormPage.tsx`에서 cron 텍스트 입력을 `CronBuilder`로 교체: 생성(create) 시 기본 "고급" 모드가 아니라 패턴 선택부터 시작, 수정(edit) 시 로드된 `cronExpression`을 역변환해 매칭되는 패턴 폼을 복원하고 안 되면 고급 모드로 폴백.
+
+**DoD**: 6가지 생성 함수 각각에 대한 단위 테스트(대표값 + 간격반복의 경계 케이스 — PLAN.md §9.2 유의점) + "생성 → 역변환 → 원래 구조화 값과 일치" 왕복 테스트 + 패턴에 맞지 않는 임의 cron 문자열에 대해 역변환이 `null`(CUSTOM)을 반환하고 고급 모드로 폴백함을 테스트로 확인. `CronBuilder`가 생성한 cron 문자열을 실제로 스케줄 생성 API에 보내 백엔드 `CronExpression.isValidExpression` 검증을 통과함을 1회 이상 수동/통합 검증.
+
+---
+
+### T20. 프론트엔드 — 대상DB 다중선택 + 결과 화면 그룹뷰 (PLAN.md §7)
+
+- `frontend/src/components/TargetDbConfigMultiSelect.tsx`: 체크박스 기반 다중 선택, 최소 1개 선택 전 제출 차단(클라이언트 검증, 서버 검증은 T18과 별개로 존재).
+- `ScheduleFormPage.tsx`: 기존 단일 `<select>`를 이 컴포넌트로 교체, 저장 시 `targetDbConfigIds` 배열로 전송.
+- `ScheduleListPage.tsx`: 각 스케줄 행에 포함된 대상DB 이름을 배지/칩 목록으로 표시(`targetDbConfigs` 응답 필드 사용).
+- `RunResultModal`/`LastResultPage`: 상단에 전체 요약(상태 배지: 성공/부분성공/실패, "대상DB N개 중 M개 성공"), 그 아래 대상DB별 섹션(이름 제목 + 상태 배지 + summary/errorMessage + `DISPLAY_ONLY`면 표)으로 재구성.
+
+**DoD**: 브라우저로 직접 조작해 (1) 대상DB 2개를 선택한 스케줄 생성, (2) ScheduleList에 두 대상DB 이름이 배지로 보임, (3) "지금 실행" 결과에 대상DB별 섹션 2개가 분리돼 보이고 서로 데이터가 섞이지 않음, (4) 한쪽 대상DB의 접속정보를 일부러 잘못 입력해 실행 시 부분성공(`PARTIAL_SUCCESS`) 상태와 실패 섹션이 올바르게 표시됨을 수동 검증(스크린샷 또는 조작 로그로 보고).
+
+---
+
+### T21. 회귀 테스트 — 레거시 3패턴 재검증 + 다중 대상DB 시나리오 추가
+
+- T14에서 작성한 레거시 3패턴 시나리오 테스트를 새 `targetDbConfigIds` 배열 계약(단일 원소 배열)에 맞게 갱신 — 동작 자체는 바뀌지 않아야 함(대상DB 1개짜리는 기존과 동일하게 동작).
+- 신규 시나리오: 대상DB 2개 + `DISPLAY_ONLY` — 두 대상DB의 `DisplayOutput`이 분리되어 저장되고 행이 섞이지 않음을 확인.
+- 신규 시나리오: 대상DB 2개 + `API_CALL` — 한쪽 대상DB의 외부 API 호출이 실패(모킹된 HTTP 서버가 500 반환)하고 다른 쪽은 성공할 때, `run-now` 응답이 `PARTIAL_SUCCESS`와 정확한 `targetDbResults`를 반환함을 엔드투엔드로 확인.
+
+**DoD**: `mvn test` 전체 그린(T14의 레거시 3패턴 + 신규 다중 대상DB 2개 시나리오 포함). `frontend`의 `CronBuilder` 단위 테스트(T19)도 그린. T20의 수동 UI 검증이 완료 보고됨.
+
+---
+
 ## Future (이번 범위 제외, 별도 라운드)
 
-### T15 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
+### T22 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
 
-- PLAN.md §3.1/§3.2, §6(TBD 명시)에 따라 실행이력 테이블 스키마를 별도로 설계(감시 서버 원칙: 상태/요약만, SP 전체 결과행 보존 금지. 실패 기록 포함).
+- PLAN.md §3.1/§3.2, §10(TBD 명시)에 따라 실행이력 테이블 스키마를 별도로 설계(감시 서버 원칙: 상태/요약만, SP 전체 결과행 보존 금지. 실패 기록 포함 — 대상DB별 세부결과(`TargetDbExecutionResult`, T17)도 영속화 대상에 포함할지 이 라운드에서 결정).
 - `ExecutionResultSink`의 새 구현(`JdbcExecutionResultSink` 등)을 추가하고 `LoggingExecutionResultSink`와 조합(`CompositeExecutionResultSink`) 또는 교체.
-- **착수 조건**: 이번 TASKS.md 범위(T1~T14) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.
+- **착수 조건**: 이번 TASKS.md 범위(T1~T21) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.

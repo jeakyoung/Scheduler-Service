@@ -327,3 +327,11 @@
 - **수동 확인도 추가로 수행**(자동화 테스트로 커버되지만 실제 Vite 파이프라인 자체도 눈으로 확인): `.env.local`에 `VITE_AUTH_DISABLED=true`를 임시로 넣고 `npm run dev`로 실제 dev 서버 기동 → `curl`로 Vite가 변환한 `AuthContext.tsx` 모듈을 직접 받아 `import.meta.env.VITE_AUTH_DISABLED`가 실제로 `"true"`로 인라인되고 `isAuthDisabled`가 그걸로 올바르게 평가되는 걸 트랜스파일된 코드 레벨에서 확인(단, 실제 브라우저 렌더링 결과를 스크린샷으로 직접 보지는 못함 — 이 환경에 브라우저 도구가 없어 렌더링된 DOM을 시각적으로 확인하는 것 자체는 못했고, 대신 위 자동화 테스트가 동일한 `AuthProvider`+`ProtectedRoute` 렌더 경로를 그대로 태우므로 그걸로 대체 확인함). 확인 후 dev 서버 종료, `.env.local`은 원상복구(`VITE_AUTH_DISABLED` 줄 제거 — 사용자가 모르고 계속 로그인 없이 쓰게 되는 상황을 방지).
 - DoD 점검: `npm run build`(`tsc -b && vite build`) 통과, `npm test` 2/2 통과, 백엔드 쪽 `mvn test`/`mvn clean package`는 이번 변경과 무관해 재실행하지 않음(프론트엔드 전용 변경).
 - 다음 작업: 없음(요청 사항 전부 완료, 사용자 확인 대기). 로컬 commit만 수행, push 없음.
+
+## 2026-11-16 — 신규 기능 요청(사용자 직접 지시): 반복주기 UI + 스케줄당 대상DB 다중선택 + 업체별 모아보기
+- 사용자 요청 3가지, 대화로 범위 확정:
+  1. **알람식 반복주기 입력**: `ScheduleFormPage`의 cron 텍스트 입력(현재 raw cron 문자열을 그대로 입력받는 방식, `cronExpression` state)을 년/월/일/시/분 구조화 입력으로 교체하고 서비스가 내부적으로 cron으로 변환. 지원 유형: **일별/월별/년별** + "**특정시간대**"(요일반복(예: 매주 월/수/금 9시)/간격반복(예: 9~18시 매 30분)/1회성 특정일시, 3가지 전부 지원 — 사용자 확인).
+  2. **스케줄당 대상DB 다중 선택**: 지금 `schedule_definition.target_db_config_id` 단일 FK(스케줄 1개=대상DB 1개) 구조를, "대상DB설정에 등록된 여러 DB 커넥션 중 복수 선택 → 실행 시 선택된 DB 전부에 SP 호출"로 변경(사용자 직접 지시: "유동적으로"). 참고로 `ScheduleFormPage`의 대상DB **단일** 선택 드롭다운 자체는 이미 구현돼 있었음(targetDbConfigApi.list() 기반) — 이번 요청은 그걸 다중선택으로 바꾸고 실행 엔진이 여러 타겟을 순회하도록 바꾸는 것.
+  3. **업체(대상DB)별 모아보기**: 2번으로 인해 한 스케줄 실행이 여러 대상DB 결과를 가지게 되므로, 그 결과를 대상DB(=업체) 단위로 묶어서 보여주는 화면. "업체"라는 별도 필드 신설이 아니라 기존 `target_db_config`(이미 이름 라벨 보유)를 그룹 기준으로 재사용.
+- 영향 범위(2번이 특히 큼): DB 스키마(`schedule_definition.target_db_config_id` 단일 FK → N:M 조인테이블), 실행 엔진(`ScheduleExecutor`/`StoredProcedureInvoker`가 대상DB 1개가 아니라 여러 개를 순회, `ExecutionResult`/`DisplayOutput` 모양에 대상DB별 서브결과 필요), API 계약(`targetDbConfigId` → `targetDbConfigIds` 배열), 프론트(폼 다중선택 UI + 결과 그룹핑 화면). 1번은 프론트 UI+cron 생성/역변환 로직 위주(기존 cron_expression 컬럼 자체는 그대로 재사용 가능해 보이나 설계는 planner 판단).
+- 규모가 커서(기존 리뷰까지 끝난 핵심 실행엔진 구조를 건드림) sched-planner에게 먼저 설계(PLAN.md/TASKS.md 갱신) 지시 후 sched-worker가 구현하는 순서로 진행. 다음 단계: sched-planner에게 위 3가지 설계 지시.

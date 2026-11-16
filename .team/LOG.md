@@ -205,3 +205,16 @@
 - Docker Desktop이 세션 재개 시점에 꺼져있어 재기동 후(이전 세션과 동일한 절차) 테스트 진행.
 - DoD 점검: `mvn test` 전체 78개 테스트 그린(기존 76개 + 비밀번호 변경 신규 2개). `mvn clean package` 재확인 성공.
 - 다음 작업: T12 (React SPA 실제 화면 구현)부터 TASKS.md 순서대로 계속.
+
+## 2026-11-16 — T12 React SPA 실제 화면 구현 (worker)
+- 공용 인프라: `api/types.ts`(백엔드 DTO와 1:1 대응하는 TS 타입), `api/auth.ts`/`schedules.ts`/`targetDbConfigs.ts`/`credentials.ts`(T8~T11 엔드포인트 전부 연결), `auth/AuthContext.tsx`(로그인 상태를 React context로, 토큰은 `authToken.ts`의 메모리 변수에만), `components/ProtectedRoute.tsx`(미로그인 시 `/login`으로), `components/Layout.tsx`(네비게이션 바 + 로그아웃).
+- **공통 401 처리**(TASKS T12 명시 요구): `api/client.ts`가 401 응답 시(로그인 엔드포인트 자체의 401은 "비밀번호 틀림"일 뿐이므로 제외) `window.dispatchEvent(new CustomEvent("auth:unauthorized"))`를 쏘고, `App.tsx`가 이를 구독해 로그아웃+`/login` 리다이렉트 — fetch 클라이언트는 React Router 컨텍스트가 없어서 커스텀 이벤트로 느슨하게 연결.
+- PLAN §7의 8개 화면 전부 실제 구현: `LoginPage`(로그인 폼), `ScheduleListPage`(활성 토글/cron/다음실행시각/마지막 실행 상태뱃지 — 스케줄마다 `last-result`를 병렬 조회/"지금 실행" 버튼→`RunResultModal`), `ScheduleFormPage`(생성·수정 공용, `ActionConfigEditor`로 API_CALL↔DISPLAY_ONLY 전환, `ParameterEditor`로 파라미터 행 추가/삭제), `LastResultPage`("이력 아님" 안내문 포함), `TargetDbConfigPage`/`CredentialPage`(목록+인라인 생성/수정/삭제, 마스킹된 값만 노출), `ChangePasswordPage`.
+- `RunResultPage.tsx`(T2가 만든 빈 라우트)는 삭제 — PLAN §7 item4가 "RunResult **컴포넌트/모달**"이라고 명시하고 있어 별도 라우트 대신 `components/RunResultModal.tsx`로 구현, `ScheduleListPage`에서 "지금 실행" 클릭 시 인라인으로 띄움.
+- **백엔드 PUT이 전체교체라 프론트가 맞춰야 했던 지점**: `TargetDbConfigPage`/`CredentialPage`의 수정 폼에서 비밀번호/값 필드를 "비워두면 유지"처럼 보이게 하려다가, T10에서 설계한 `PUT`이 항상 `@NotBlank`로 전체 필드를 요구한다는 걸 다시 확인하고 수정 시에도 항상 재입력을 요구하도록 고쳤다(안내 문구로 이유 명시) — 백엔드를 바꾸는 대신 프론트가 실제 계약에 맞춘 것.
+- `index.css`를 Vite 템플릿의 랜딩페이지 스타일(가운데정렬, 고정폭 1126px)에서 테이블/폼 중심 어드민 툴에 맞는 레이아웃(좌측정렬, 네비게이션 바, 테이블/모달/상태뱃지 스타일)으로 전면 교체.
+- **DoD 검증 방식에 대한 솔직한 한계**: 이 환경에는 브라우저 자동화 도구(Playwright/Puppeteer 등)가 전혀 없어 "브라우저로 직접 조작 → 스크린샷"은 불가능했음(`ToolSearch`로 확인함). 대신: (1) `tsc --noEmit`/`npm run build` 전부 에러 없이 통과, (2) Vite 개발서버가 전체 모듈 그래프(App/AuthProvider/모든 페이지/컴포넌트)를 실제로 변환·서빙하는 것까지 확인(런타임 import/JSX 에러가 있었다면 여기서 드러남), (3) **실제 백엔드를 띄우고 UI가 수행할 정확한 API 호출 순서를 `curl`로 그대로 재현**: 로그인 → 대상DB 등록(같은 컨테이너를 가리키게 해서 실제 SP 왕복이 되도록) → 자격증명 등록 → DISPLAY_ONLY 스케줄 생성 → 상태 조회(cron 기반 다음실행시각이 실제로 맞게 계산됨: 2026-11-16(월) 오전9시가 이미 지나 다음날로 정확히 넘어감) → "지금 실행"(실제 SP 결과가 `displayOutput.rows`로 돌아옴) → 최근결과 조회(동일 결과 반영) → 파라미터 교체 → API_CALL로 수정하며 cron도 변경(다음실행시각이 실제로 바뀜) 전부 성공 확인. 이 과정에서 각 응답 JSON 모양이 프론트의 `types.ts`/페이지가 기대하는 것과 정확히 일치함을 직접 대조함.
+- 검증 중 발견: 포트 8080이 이 작업과 무관한 사용자의 다른 프로세스(JDK 1.8 javaw, 우리 프로젝트가 쓰는 포트가 아닌 다른 용도)가 이미 점유하고 있어 백엔드 기동이 실패함 — 그 프로세스를 건드리지 않고 `SERVER_PORT=8090`으로 돌려 충돌을 피함(사용자의 무관한 작업을 함부로 종료하지 않는다는 원칙 준수).
+- DoD 점검: 빌드/타입체크 성공, 전체 플로우가 실제 API 레벨에서 재컴파일 없이 동작함을 확인. **다만 "브라우저 조작 스크린샷"이라는 DoD 문구 자체는 이 환경의 한계로 문자 그대로 충족하지 못했음을 투명하게 기록** — 필요 시 사용자가 로컬에서 `npm run dev`로 직접 띄워 육안 확인하는 것을 권장.
+- 검증 후 정리: 백엔드/프론트 프로세스 종료, 검증용 SQL Server 컨테이너 삭제.
+- 다음 작업: T13 (설정/비밀값 최종 점검).

@@ -27,6 +27,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
+    // A 401 from the login endpoint itself just means "wrong credentials" - that's for the
+    // login form to show, not a reason to force a redirect loop back to /login.
+    if (response.status === 401 && path !== "/api/auth/login") {
+      window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+    }
     throw new ApiError(response.status, await response.text());
   }
 

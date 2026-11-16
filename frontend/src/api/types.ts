@@ -2,7 +2,7 @@ export type ActionType = "API_CALL" | "DISPLAY_ONLY";
 export type GroupingMode = "PER_ROW" | "GROUP_BY";
 export type ParamDataType = "STRING" | "INT" | "DECIMAL" | "DATE" | "DATETIME" | "BOOLEAN";
 export type ValueSource = "LITERAL" | "CURRENT_DATE" | "CURRENT_DATETIME";
-export type ExecutionStatus = "SUCCESS" | "FAILURE";
+export type ExecutionStatus = "SUCCESS" | "PARTIAL_SUCCESS" | "FAILURE";
 export type TriggerType = "SCHEDULED" | "MANUAL";
 
 export interface ApiCallActionConfig {
@@ -36,6 +36,11 @@ export interface ScheduleParameterInput {
   literalValue: string | null;
 }
 
+export interface TargetDbConfigRef {
+  id: number;
+  name: string;
+}
+
 export interface Schedule {
   id: number;
   name: string;
@@ -43,7 +48,8 @@ export interface Schedule {
   cronExpression: string;
   timezone: string;
   spName: string;
-  targetDbConfigId: number;
+  targetDbConfigIds: number[];
+  targetDbConfigs: TargetDbConfigRef[];
   actionType: ActionType;
   actionConfig: ApiCallActionConfig | DisplayOnlyActionConfig;
   description: string | null;
@@ -60,10 +66,21 @@ export interface ScheduleInput {
   cronExpression: string;
   timezone: string;
   spName: string;
-  targetDbConfigId: number;
+  targetDbConfigIds: number[];
   actionType: ActionType;
   actionConfig: ApiCallActionConfig | DisplayOnlyActionConfig;
   description?: string | null;
+}
+
+// 2026-11-16 (multi-target-DB round, PLAN.md §3.1b): one schedule run now visits N target DBs,
+// so the overall ExecutionResult carries a per-target-DB breakdown. targetDbResults[i].status
+// is always SUCCESS/FAILURE, never PARTIAL_SUCCESS (that's only meaningful once combined).
+export interface TargetDbExecutionResult {
+  targetDbConfigId: number;
+  targetDbConfigName: string;
+  status: ExecutionStatus;
+  summary: string;
+  errorMessage: string | null;
 }
 
 export interface ExecutionResult {
@@ -74,10 +91,15 @@ export interface ExecutionResult {
   status: ExecutionStatus;
   summary: string;
   errorMessage: string | null;
+  targetDbResults: TargetDbExecutionResult[];
 }
 
+// One DisplayOutput now always belongs to exactly one target DB - never merged across target
+// DBs (PLAN.md §3.3).
 export interface DisplayOutput {
   scheduleId: number;
+  targetDbConfigId: number;
+  targetDbConfigName: string;
   columns: string[];
   rows: Record<string, unknown>[];
   generatedAt: string;
@@ -85,7 +107,7 @@ export interface DisplayOutput {
 
 export interface RunResult {
   result: ExecutionResult;
-  displayOutput: DisplayOutput | null;
+  displayOutputs: DisplayOutput[];
 }
 
 export interface ScheduleStatus {

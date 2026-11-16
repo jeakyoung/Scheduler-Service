@@ -8,7 +8,7 @@ interface Props {
 
 /** PLAN.md §7 item 4: "RunResult 컴포넌트/모달" - not a routed page, shown inline from ScheduleListPage. */
 export default function RunResultModal({ scheduleName, result, onClose }: Props) {
-  const { result: execution, displayOutput } = result;
+  const { result: execution, displayOutputs } = result;
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true">
@@ -26,8 +26,11 @@ export default function RunResultModal({ scheduleName, result, onClose }: Props)
           시작: {execution.startedAt} / 종료: {execution.finishedAt} ({execution.triggerType})
         </p>
 
-        {displayOutput && (
-          <div className="table-scroll">
+        {/* One table per target DB - never merged (PLAN.md §3.3/§5). T20 adds a fuller
+            per-target-DB section (status badge, summary/errorMessage) around this. */}
+        {displayOutputs.map((displayOutput) => (
+          <div key={displayOutput.targetDbConfigId} className="table-scroll">
+            <h3>{displayOutput.targetDbConfigName}</h3>
             <table>
               <thead>
                 <tr>
@@ -47,7 +50,7 @@ export default function RunResultModal({ scheduleName, result, onClose }: Props)
               </tbody>
             </table>
           </div>
-        )}
+        ))}
 
         <button type="button" onClick={onClose}>
           닫기

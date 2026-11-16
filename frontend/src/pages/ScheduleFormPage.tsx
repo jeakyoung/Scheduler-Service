@@ -13,6 +13,7 @@ import type {
 } from "../api/types";
 import ActionConfigEditor from "../components/ActionConfigEditor";
 import ParameterEditor from "../components/ParameterEditor";
+import CronBuilder from "../components/CronBuilder";
 
 const EMPTY_API_CALL: ApiCallActionConfig = {
   method: "POST",
@@ -67,7 +68,10 @@ export default function ScheduleFormPage() {
           setCronExpression(schedule.cronExpression);
           setTimezone(schedule.timezone);
           setSpName(schedule.spName);
-          setTargetDbConfigId(schedule.targetDbConfigId);
+          // T20 replaces this single-select with a real multi-select
+          // (TargetDbConfigMultiSelect) sending the full targetDbConfigIds array - for now
+          // this just shows/edits the first configured target DB.
+          setTargetDbConfigId(schedule.targetDbConfigIds[0] ?? "");
           setActionType(schedule.actionType);
           setDescription(schedule.description ?? "");
           setParameters(
@@ -113,7 +117,7 @@ export default function ScheduleFormPage() {
         cronExpression,
         timezone,
         spName,
-        targetDbConfigId: targetDbConfigId as number,
+        targetDbConfigIds: [targetDbConfigId as number],
         actionType,
         actionConfig: actionType === "API_CALL" ? apiCallConfig : displayOnlyConfig,
         description: description || null,
@@ -146,15 +150,7 @@ export default function ScheduleFormPage() {
           활성화 (Quartz에 즉시 등록됨)
         </label>
 
-        <label>
-          Cron 표현식 (Quartz 형식, 요일 지정 시 일(day-of-month)은 <code>?</code>)
-          <input
-            value={cronExpression}
-            onChange={(e) => setCronExpression(e.target.value)}
-            placeholder="0 0/30 * ? * MON-FRI"
-            required
-          />
-        </label>
+        <CronBuilder value={cronExpression} onChange={setCronExpression} />
 
         <label>
           타임존

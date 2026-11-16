@@ -6,6 +6,8 @@ package com.scheduler.web.api;
  */
 final class Masking {
 
+    private static final int VISIBLE_SUFFIX_LENGTH = 4;
+
     private Masking() {
     }
 
@@ -13,8 +15,12 @@ final class Masking {
         if (value == null || value.isEmpty()) {
             return "";
         }
-        int visible = Math.min(4, value.length());
-        String tail = value.substring(value.length() - visible);
-        return "*".repeat(value.length() - visible) + tail;
+        // A value no longer than the visible suffix would otherwise show entirely in the
+        // clear (e.g. a 4-digit legacy-style security code) - mask it completely instead.
+        if (value.length() <= VISIBLE_SUFFIX_LENGTH) {
+            return "*".repeat(value.length());
+        }
+        String tail = value.substring(value.length() - VISIBLE_SUFFIX_LENGTH);
+        return "*".repeat(value.length() - VISIBLE_SUFFIX_LENGTH) + tail;
     }
 }

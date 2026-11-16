@@ -50,6 +50,22 @@ class CredentialControllerTest extends AbstractRepositoryIntegrationTest {
     }
 
     @Test
+    void shortValueIsFullyMaskedNotLeakedInTheClear() throws Exception {
+        // REVIEW.md M2: a 4-char-or-shorter secret (e.g. a legacy-style 4-digit security
+        // code such as FCM_SECURITY_CODE) used to come back completely unmasked.
+        String response = mockMvc.perform(post("/api/config/credentials")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"SHORT_CODE","value":"4002","description":"test"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.maskedValue").value("****"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).doesNotContain("4002");
+    }
+
+    @Test
     void createReturnsMaskedValueNeverPlaintext() throws Exception {
         String response = mockMvc.perform(post("/api/config/credentials")
                         .contentType(MediaType.APPLICATION_JSON)

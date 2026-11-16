@@ -42,6 +42,22 @@ class TargetDbConfigControllerTest extends AbstractRepositoryIntegrationTest {
     private ScheduleRepository scheduleRepository;
 
     @Test
+    void shortPasswordIsFullyMaskedNotLeakedInTheClear() throws Exception {
+        // REVIEW.md M2: a 4-char-or-shorter secret (e.g. a legacy-style 4-digit security
+        // code) used to come back completely unmasked.
+        String response = mockMvc.perform(post("/api/config/target-db")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"Short pw","jdbcUrl":"jdbc:sqlserver://biz-db;","username":"erp_user","password":"4002"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.maskedPassword").value("****"))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).doesNotContain("4002");
+    }
+
+    @Test
     void createReturnsMaskedPasswordNeverPlaintext() throws Exception {
         String response = mockMvc.perform(post("/api/config/target-db")
                         .contentType(MediaType.APPLICATION_JSON)

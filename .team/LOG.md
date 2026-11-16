@@ -259,3 +259,9 @@
 - 테스트: `SqlIdentifierValidatorTest`(정상 식별자/스키마접두사/대괄호 허용, null·blank·인젝션 페이로드 4종 거부) + `ScheduleControllerTest.createWithMaliciousSpNameIsBadRequest`(`spName: "sp_test; DROP TABLE some_table; --"`로 `POST /api/schedules` 시도 → 400 확인, REVIEW.md 재현 시나리오 그대로).
 - DoD 점검: `mvn test` 전체 86개 테스트 그린(기존 81 + 신규 5). `mvn clean package` 재확인 성공.
 - 다음 작업: M2(`Masking.lastFour` 4자 이하 평문노출 수정).
+
+## 2026-11-16 — REVIEW.md M2 수정: 짧은 비밀값 마스킹 (worker)
+- `web/api/Masking.lastFour`: 길이가 `VISIBLE_SUFFIX_LENGTH`(4) **이하**인 값은 끝 4자를 보여주는 대신 **전체를 `*`로 마스킹**하도록 분기 추가(기존엔 `visible = min(4, length)`가 `length`와 같아져 `"*".repeat(0)`이 되는 경계버그). 4자 초과 값의 기존 "끝 4자만 노출" 동작은 그대로 유지.
+- 테스트: `MaskingTest`(신규 단위테스트, null/empty/1~4자 전체마스킹/5자 이상 끝4자 노출 전부 검증, REVIEW.md가 지적한 "4002" 케이스 포함) + `TargetDbConfigControllerTest.shortPasswordIsFullyMaskedNotLeakedInTheClear`/`CredentialControllerTest.shortValueIsFullyMaskedNotLeakedInTheClear`(API 레벨로 `password`/`value`를 `"4002"`로 생성 → 응답이 `"****"`이고 평문 `"4002"`를 포함하지 않음을 확인, REVIEW.md 재현 시나리오 그대로).
+- DoD 점검: `mvn test` 전체 91개 테스트 그린(기존 86 + 신규 5). `mvn clean package` 재확인 성공.
+- 다음 작업: N1(`BodyTemplateRenderer` JSON 이스케이프 누락 — 가능하면 같이 수정).

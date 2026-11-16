@@ -152,6 +152,32 @@ class ScheduleExecutorTest {
     }
 
     @Test
+    void apiCallBodyWithSpecialCharactersInColumnValueStaysValidJson() throws Exception {
+        // REVIEW.md N1: an SP column value containing JSON special characters used to
+        // break the rendered body's structure (or inject an unintended field).
+        responseStatusesInOrder = new int[]{200};
+        when(credentialRepository.findByName("SAMPLE_API_KEY")).thenReturn(Optional.of(
+                new Credential(1L, "SAMPLE_API_KEY", "super-secret-api-key-value", null, null, null)
+        ));
+
+        ScheduleDefinition schedule = apiCallSchedule(GroupingMode.PER_ROW, null);
+        when(scheduleRepository.findById(SCHEDULE_ID)).thenReturn(Optional.of(schedule));
+        when(storedProcedureInvoker.invoke(any(), any(), any(), any(), any())).thenReturn(List.of(
+                Map.of("EMPLOYEE_NO", "E001\",\"injected\":\"x")
+        ));
+
+        ExecutionResult result = newExecutor().execute(SCHEDULE_ID, TriggerType.SCHEDULED);
+
+        assertThat(result.status()).isEqualTo(ExecutionStatus.SUCCESS);
+        assertThat(receivedBodies).hasSize(1);
+
+        com.fasterxml.jackson.databind.JsonNode parsed =
+                new com.fasterxml.jackson.databind.ObjectMapper().readTree(receivedBodies.get(0));
+        assertThat(parsed.fieldNames()).toIterable().containsExactly("empList");
+        assertThat(parsed.get("empList").get(0).asText()).isEqualTo("E001\",\"injected\":\"x");
+    }
+
+    @Test
     void apiCallScheduleGroupByReportsPartialFailure() {
         responseStatusesInOrder = new int[]{200, 500};
         when(credentialRepository.findByName("SAMPLE_API_KEY")).thenReturn(Optional.of(

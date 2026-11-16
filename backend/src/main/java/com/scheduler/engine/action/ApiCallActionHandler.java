@@ -41,7 +41,10 @@ public class ApiCallActionHandler implements ActionHandler {
         for (List<Map<String, Object>> group : callGroups) {
             Map<String, Object> templateRow = group.get(0);
             try {
-                String body = BodyTemplateRenderer.render(config.bodyTemplate(), templateRow, this::resolveCredential);
+                // bodyTemplate is JSON (PLAN.md §5) - renderJson escapes substituted values
+                // so a column/credential value can't break the JSON structure or inject
+                // fields (REVIEW.md N1). Header values aren't JSON, so they stay unescaped.
+                String body = BodyTemplateRenderer.renderJson(config.bodyTemplate(), templateRow, this::resolveCredential);
                 Map<String, String> headers = renderHeaders(config.headers(), templateRow);
 
                 HttpCallResult response = httpClient.call(config.method(), config.url(), headers, body);

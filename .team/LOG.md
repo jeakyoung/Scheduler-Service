@@ -265,3 +265,10 @@
 - 테스트: `MaskingTest`(신규 단위테스트, null/empty/1~4자 전체마스킹/5자 이상 끝4자 노출 전부 검증, REVIEW.md가 지적한 "4002" 케이스 포함) + `TargetDbConfigControllerTest.shortPasswordIsFullyMaskedNotLeakedInTheClear`/`CredentialControllerTest.shortValueIsFullyMaskedNotLeakedInTheClear`(API 레벨로 `password`/`value`를 `"4002"`로 생성 → 응답이 `"****"`이고 평문 `"4002"`를 포함하지 않음을 확인, REVIEW.md 재현 시나리오 그대로).
 - DoD 점검: `mvn test` 전체 91개 테스트 그린(기존 86 + 신규 5). `mvn clean package` 재확인 성공.
 - 다음 작업: N1(`BodyTemplateRenderer` JSON 이스케이프 누락 — 가능하면 같이 수정).
+
+## 2026-11-16 — REVIEW.md N1 수정: BodyTemplateRenderer JSON 이스케이프 (worker)
+- `engine/action/BodyTemplateRenderer`: 기존 `render(...)`(이스케이프 없음)는 그대로 두고, **바디 전용** `renderJson(...)`을 신규 추가 — 치환값을 Jackson `ObjectMapper.writeValueAsString(...)`로 JSON 문자열 이스케이프(따옴표/백슬래시/개행 전부 처리)한 뒤 양끝 인용부호만 벗겨서 삽입. `${COLUMN}`과 `${cred:NAME}` 양쪽 다 이스케이프 적용(리뷰는 컬럼값만 지목했지만, 같은 메서드·같은 위험이라 자격증명 치환도 함께 보호 — 바디가 JSON이라는 전제 자체가 두 치환 종류 모두에 동일하게 적용되므로).
+- **헤더 값은 의도적으로 그대로 둠**: `BodyTemplateRenderer.render(...)`가 `ApiCallActionHandler.renderHeaders(...)`에서도 재사용되는데, HTTP 헤더 값은 JSON이 아니므로 JSON 이스케이프를 적용하면 오히려 잘못된 동작이 됨 — `render()`(헤더용, 무이스케이프)와 `renderJson()`(바디용, 이스케이프)으로 분리해 호출부(`ApiCallActionHandler`)가 바디에만 `renderJson`을 쓰도록 수정.
+- 테스트: `BodyTemplateRendererTest`에 4개 추가(`"`/`\` 포함 값이 주입 없이 올바른 JSON 문자열로 남는지 `JsonNode`로 재파싱해 검증, 개행 포함 값, 자격증명 치환값도 이스케이프되는지, 기존 `render()`(헤더용)는 여전히 무이스케이프임을 재확인) + `ScheduleExecutorTest.apiCallBodyWithSpecialCharactersInColumnValueStaysValidJson`(SP 컬럼값에 `"`/`:` 포함 — REVIEW.md 재현 페이로드 그대로 — 실제 HTTP 바디를 JSON으로 재파싱해 필드가 주입되지 않고 원래 값 그대로 복원됨을 확인).
+- DoD 점검: `mvn test` 전체 96개 테스트 그린(기존 91 + 신규 5). `mvn clean package` 재확인 성공.
+- 다음 작업: N3(`run-now`/`last-result`의 실패 시 과거 `DisplayOutput` 노출 — 가능하면 같이 수정).

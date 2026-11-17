@@ -42,6 +42,15 @@
           version. Not copied from any other project's pom.xml.
         -->
         <jjwt.version>0.13.0</jjwt.version>
+        <!--
+          frontend-maven-plugin (eirslett) 2.0.2 — independently confirmed 2026-11-17 via
+          Maven Central metadata (repo1.maven.org/.../com/github/eirslett/frontend-maven-plugin/
+          maven-metadata.xml): latest released version, not copied from another project.
+          nodeVersion below pins to the Node already proven to build this frontend throughout
+          this project's history (checked via "node -v" on this machine) rather than guessing one.
+        -->
+        <frontend-maven-plugin.version>2.0.2</frontend-maven-plugin.version>
+        <frontend.node.version>v22.14.0</frontend.node.version>
     </properties>
 
     <dependencies>
@@ -178,6 +187,86 @@
                         </exclude>
                     </excludes>
                 </configuration>
+            </plugin>
+
+            <!--
+              PLAN.md §11.2/TASKS.md T23: single `mvn clean package` builds the frontend too.
+              Bound to prepare-package (right before the war/repackage goals run), not an
+              earlier phase like generate-resources - `mvn test` only runs up through the
+              `test` phase and never reaches prepare-package, so routine backend-only test
+              iteration doesn't pay the npm install/build cost on every run. T24's SPA-fallback
+              integration tests use a small src/test/resources/static fixture instead of
+              depending on this real build output being present during `mvn test`.
+            -->
+            <plugin>
+                <groupId>com.github.eirslett</groupId>
+                <artifactId>frontend-maven-plugin</artifactId>
+                <version>${frontend-maven-plugin.version}</version>
+                <configuration>
+                    <workingDirectory>${project.basedir}/../frontend</workingDirectory>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>install-node-and-npm</id>
+                        <goals>
+                            <goal>install-node-and-npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <nodeVersion>${frontend.node.version}</nodeVersion>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-install</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>install</arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>npm-build</id>
+                        <goals>
+                            <goal>npm</goal>
+                        </goals>
+                        <phase>prepare-package</phase>
+                        <configuration>
+                            <arguments>run build</arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <!--
+              Copies frontend/dist (the npm build output above) into target/classes/static,
+              not src/main/resources/static - that keeps the build artifact out of the source
+              tree/git diffs (PLAN.md §11.2). Declared after frontend-maven-plugin and bound to
+              the same prepare-package phase, so within that phase it runs second (Maven runs
+              same-phase plugin executions in pom declaration order) - the npm build has
+              already produced frontend/dist by the time this copy runs.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>copy-frontend-dist</id>
+                        <phase>prepare-package</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${project.basedir}/../frontend/dist</directory>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
             </plugin>
         </plugins>
     </build>

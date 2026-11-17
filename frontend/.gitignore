@@ -12,6 +12,10 @@ dist
 dist-ssr
 *.local
 
+# backend/pom.xml's frontend-maven-plugin (T23) downloads a local Node/npm here when Maven
+# drives the frontend build - not a dependency to commit, same as node_modules above.
+/node/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

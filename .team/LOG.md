@@ -477,3 +477,29 @@
 - **실측 검증 3 (end-to-end, T26과 공유)**: `mvn clean package`로 만든 실제 WAR(`target/scheduler-service-0.1.0-SNAPSHOT.war`, 프론트 빌드 포함)를 ROOT 컨텍스트로 `java -jar`로 직접 기동(H2 fallback DB, 임시 admin 계정) → curl로 (1) `GET /` 200, (2) 인증 없는 `GET /api/schedules` 401, (3) `GET /schedules`(SPA 폴백) 200, (4) 실제 빌드된 JS 자산 200, (5) `POST /api/auth/login` 성공 토큰 발급, (6) 발급된 토큰으로 `GET /api/schedules` 200 `[]` — 로그인부터 인증된 API 호출까지 패키징된 실제 WAR 산출물로 엔드투엔드 재현 확인.
 - 비-ROOT 컨텍스트 경로(`-Dserver.servlet.context-path=/scheduler-service`)로 임베디드 톰캣을 직접 띄워 같은 걸 재현해보려 했으나, WAR를 `java -jar`로 직접 실행하는 경로(SpringBootServletInitializer를 통한 실제 서블릿 컨테이너 배치가 아니라 내장 톰캣 부트스트랩 경로)에서 `server.servlet.context-path`를 비-root로 설정하면 Spring Boot 자체에서 `ContextPath must start with '/' and not end with '/'` 예외가 발생함(env var/`-D`/커맨드라인 인자 세 방식 모두 동일 실패) — bytecode까지 확인했지만 값 자체는 유효해 보여 원인 미해결. 이 경로는 실제 운영 배치 방식(외부 Tomcat에 WAR 배치)과 다르므로 더 깊이 파지 않고, 대신 위의 WHATWG URL 해석 실측(검증 2)과 T26에서의 실제 Tomcat 검증으로 결론을 대체함.
 - DoD 점검: production 빌드에 빈 값이 반영됨을 실측 확인, ROOT 배치 시 로그인→인증된 API 호출까지 실제 WAR로 엔드투엔드 확인, 그리고 PLAN.md의 "컨텍스트 경로 무관" 주장이 ROOT 배치를 전제로만 성립함을 실측으로 명확히 함. 다음 작업: T26(로컬 개발 워크플로 회귀 없음 종합확인 — 로컬 Tomcat 설치 가능성 조사 포함).
+
+## 2026-11-17 — T26: 로컬 개발 워크플로 회귀 없음 종합확인 (worker)
+- PLAN.md/TASKS.md T26. T22~T25(WAR 패키징, provided 스코프, 빌드 파이프라인, SPA 폴백+SecurityConfig 수정, API 베이스 URL 상대경로화)를 모두 적용한 상태에서 코드 변경 없이 **두 가지 로컬 워크플로를 실측으로 재확인**. 아래는 조작 로그(요청/응답 전부 실제 curl 호출 결과).
+
+### 워크플로 1: 분리 실행 (백엔드 8080 + 프론트 5173, CORS)
+- `MASTER_ENCRYPTION_KEY`/`JWT_SIGNING_KEY`/`INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD` 임시값으로 `mvn spring-boot:run` 실행 → 4.7초 내 정상 기동(embedded Tomcat, port 8080) — T22에서 `spring-boot-starter-tomcat`을 `provided` 스코프로 바꾼 것이 로컬 `spring-boot:run`에 영향 없음을 재확인.
+- 프론트엔드는 이미 이 세션에서 켜져 있던 `npm run dev`(5173) 인스턴스를 그대로 사용(중복 기동 인스턴스는 정리). `curl http://localhost:5173/src/api/client.ts`로 번들된 모듈의 `import.meta.env`를 직접 확인 → `VITE_API_BASE_URL: "http://localhost:8080"`(`.env.local`의 절대 URL) — T25에서 신설한 `.env.production`이 dev 모드에는 전혀 영향을 주지 않음을 재확인.
+- CORS: `Origin: http://localhost:5173`로 `OPTIONS /api/schedules` 프리플라이트 → `Access-Control-Allow-Origin: http://localhost:5173` 등 정상 응답(200). 같은 Origin으로 실제 `GET /api/schedules`(토큰 없음) → 401 + CORS 헤더 포함 정상 응답 — CORS 자체와 인증 로직이 독립적으로 둘 다 올바르게 동작.
+
+### 워크플로 2: 통합 WAR 로컬 검증
+- **로컬 Tomcat 설치 가능성 조사**: 이 환경은 인터넷 접근이 가능했고(`archive.apache.org` 200 응답), 이 프로젝트가 실제로 쓰는 임베디드 Tomcat 버전을 `mvn dependency:tree`로 먼저 확인(`org.apache.tomcat.embed:tomcat-embed-core:10.1.55`) → **정확히 같은 버전**의 독립 실행형 Apache Tomcat 10.1.55 배포본(`apache-tomcat-10.1.55.zip`)을 `archive.apache.org/dist/tomcat/tomcat-10/v10.1.55/`에서 직접 다운로드해 `/tmp/tomcat10`에 압축 해제 — 시스템 설치 없이(관리자 권한 불필요, zip 압축 해제만으로) 완전히 동작하는 로컬 Tomcat 확보. 설치 자체는 어렵지 않았으므로 대체 수단 없이 **실제 외부 Tomcat으로 검증**.
+- 기본 `webapps/ROOT`, `examples`, `docs`, `manager` 등 샘플 앱 제거 후 `mvn clean package`로 만든 실제 WAR(프론트 빌드 포함)를 `webapps/ROOT.war`로 배치(PLAN.md §11.4 권장대로 컨텍스트 경로 `/`). `bin/setenv.sh`에 `JAVA_OPTS`로 `-DMASTER_ENCRYPTION_KEY=...`(값에 `+`/`=` 포함) 등을 주입(PLAN.md §11.6 패턴 그대로) — Tomcat 기동 로그의 "명령 행 아규먼트" 출력으로 특수문자가 잘리거나 깨지지 않고 그대로 전달됨을 확인(T27의 "값에 `+`/`=` 들어갈 때 인용 주의" 항목의 실측 근거).
+- `bin/catalina.sh run`으로 **실제 외부 Tomcat**(임베디드가 아님 — `SpringBootServletInitializer.onStartup()` 경로가 실제로 타는 것을 로그로 확인: "started by USER in ...\tomcat10", webapp 배치 로그 등)에서 기동 성공(39.8초, HostConfig가 WAR를 직접 배치).
+- **엔드투엔드 curl 검증**(전부 실제 응답 포함):
+  1. `GET /` → 200 (index.html)
+  2. `GET /api/schedules`(토큰 없음) → 401
+  3. `POST /api/auth/login`(admin/Passw0rd!123) → 200, JWT 토큰 발급
+  4. `POST /api/config/target-db`(토큰 포함) → 201류 생성 성공, id=1
+  5. `POST /api/schedules`(DISPLAY_ONLY 액션, 대상DB id=1) → 생성 성공, id=1
+  6. `GET /api/schedules` → 생성된 스케줄 1건 조회(CRUD: read)
+  7. `PUT /api/schedules/1`(CRUD: update) → 수정 성공
+  8. `POST /api/schedules/1/run-now`(지금실행) → 200, `{"result":{"status":"FAILURE",...}}` — 가짜 JDBC URL(`example-business-db`)이라 연결 자체는 실패하지만, 이는 "지금실행" 요청이 라우팅→인증→Quartz 트리거→`StoredProcedureInvoker` 호출까지 전체 파이프라인을 실제로 통과했다는 증거(파이프라인 자체는 정상, 대상DB 연결 실패는 테스트 데이터의 한계일 뿐).
+  9. `DELETE /api/schedules/1`(CRUD: delete) → 204, 이후 목록 조회 `[]` 확인.
+- 로그인→스케줄 CRUD(생성/조회/수정/삭제)→지금실행까지 단일 오리진(`http://localhost:8080`, 컨텍스트 경로 `/`)에서 전부 정상 동작함을 실측 확인. 검증 후 `bin/shutdown.sh`로 Tomcat 정상 종료, `/tmp/tomcat10` 삭제.
+- `mvn test` 123/123 그린 유지(T22~T25 전체 누적, 신규 회귀 없음).
+- DoD 점검: 두 워크플로 모두 수동 실측 검증 통과(위 조작 로그), `mvn test` 전체 그린. 다음 작업: T27(README Tomcat 배포 가이드 — ROOT.war가 권장이 아니라 필수 전제조건임을 명시, setenv 특수문자 인용 주의사항 포함).

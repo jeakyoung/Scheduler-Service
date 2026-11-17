@@ -7,6 +7,8 @@
 - `backend/` — Spring Boot REST API (화면 렌더링 없음)
 - `frontend/` — React SPA (백엔드와 별도로 빌드/배포, T2에서 스캐폴딩)
 
+**단, 운영 배포는 둘을 하나의 WAR로 합쳐 외부 Tomcat에 올리는 방식으로 바뀌었다(PLAN.md §11, T22~T27)** — 실제 쓸 수 있는 배포 인프라가 외부 Tomcat뿐이라서다. 로컬 개발에서 백엔드/프론트를 따로 띄우는 방식(`mvn spring-boot:run` 8080 + `npm run dev` 5173)은 그대로 유지되며, 아래 "로컬 개발"과 "운영 배포 (Tomcat, 단일 WAR)" 섹션은 서로 다른 워크플로다. 혼동하지 말 것.
+
 ## 백엔드 로컬 기동에 필요한 환경변수
 
 | 환경변수 | 설명 |
@@ -66,11 +68,74 @@ React SPA가 백엔드와 다른 오리진이라, 세션 쿠키 방식 대신 **
 
 백엔드 `backend/src/main/java/com/scheduler/security/CorsConfig.java` + `SecurityConfig.java`가 `app.cors.allowed-origin`(`CORS_ALLOWED_ORIGIN` 환경변수)에 등록된 오리진만 허용한다. 로컬 SQL Server 컨테이너로 백엔드를 띄우고 `curl`로 프론트 오리진(`http://localhost:5173`)을 흉내 낸 preflight(OPTIONS) → 로그인(POST `/api/auth/login`) → 받은 토큰으로 인증된 GET(`/api/schedules`) 전체 플로우를 실행해 매 단계 `Access-Control-Allow-Origin` 헤더가 정확히 돌아오고, 토큰 없는 요청은 401이 되는 것을 확인했다(브라우저가 내부적으로 수행하는 것과 동일한 점검).
 
+## 운영 배포 (Tomcat, 단일 WAR) — T22~T27
+
+실제 쓸 수 있는 운영 인프라가 외부 Tomcat뿐이라, 운영 배포는 백엔드 jar + 프론트 별도 정적 배포가 아니라 **프론트 빌드 결과를 포함한 단일 WAR**를 외부 Tomcat에 올리는 방식으로 결정됨(PLAN.md §11). 아래 순서를 그대로 따라가면 처음 보는 사람도 재현 가능하도록 작성.
+
+### 1. WAR 빌드 (프론트 빌드까지 한 번에)
+
+```bash
+cd backend
+mvn clean package
+```
+
+`backend/pom.xml`에 추가된 `frontend-maven-plugin`이 `prepare-package` 단계에서 `frontend/`의 `npm install`/`npm run build`까지 전부 수행하고(Node/npm이 시스템에 전혀 설치되어 있지 않아도 됨 — 이 플러그인이 지정된 Node 버전을 자체 다운로드함), 그 결과(`frontend/dist/**`)를 `target/classes/static/`으로 복사해 WAR 안에 함께 패키징한다. 결과물은 `backend/target/scheduler-service-0.1.0-SNAPSHOT.war` 하나. `mvn test`만 실행할 때는 이 프론트 빌드 단계가 돌지 않으므로(의도적 — 평소 백엔드 테스트 반복이 Node/npm과 무관하게 빠르게 유지됨) 느려지지 않는다.
+
+### 2. Tomcat에 배치 — 반드시 `ROOT.war`로
+
+```bash
+cp backend/target/scheduler-service-0.1.0-SNAPSHOT.war $CATALINA_HOME/webapps/ROOT.war
+```
+
+**`ROOT.war`로 이름을 바꾸는 것은 권장이 아니라 필수 전제조건이다.** 프론트엔드의 API 호출은 모두 `/api/...`처럼 선행 슬래시가 붙은 경로라(`frontend/src/api/client.ts`), 브라우저의 URL 해석 규칙상 이런 경로는 항상 **origin root**로 요청이 가고, 페이지가 서빙된 디렉터리를 기준으로 하지 않는다(T25에서 `new URL('/api/x', 'http://host/scheduler-service/')` 같은 식으로 직접 실측 확인한 내용). 즉 `scheduler-service.war`처럼 이름을 그대로 두어 컨텍스트 경로가 `/scheduler-service`가 되면 프론트는 로드되지만 모든 API 호출이 깨진다. `ROOT.war`(컨텍스트 경로 `/`)로 배치해야만 프론트가 하드코딩된 `localhost` 없이 상대경로로 API를 정상 호출한다(T25/T26에서 실제 Tomcat에 올려 로그인→스케줄 CRUD→지금실행까지 end-to-end로 확인됨).
+
+### 3. 환경변수 주입 — `setenv.sh`/`setenv.bat`
+
+외부 Tomcat은 `catalina.sh`/`catalina.bat`로 기동되지 셸 `export`로 기동되는 게 아니므로, 환경변수는 `$CATALINA_HOME/bin/setenv.sh`(Linux/Mac) 또는 `setenv.bat`(Windows)에 `JAVA_OPTS`의 `-D` 시스템 프로퍼티로 주입한다. Tomcat은 기동 시 이 파일이 있으면 자동으로 읽는다(표준 확장 지점). Spring Boot는 JVM 시스템 프로퍼티와 OS 환경변수를 모두 동일하게 `${VAR}` 플레이스홀더로 해석하므로, `application.yml`이나 자바 코드는 이 때문에 전혀 바뀌지 않는다.
+
+**이 파일은 Tomcat 설치본(`$CATALINA_HOME/bin/`) 안에 두는 것이고, 이 레포에는 절대 커밋하지 않는다** — 아래는 참고용 예시일 뿐이다.
+
+`setenv.sh` (Linux/Mac):
+```sh
+export JAVA_OPTS="$JAVA_OPTS \
+  -DDB_URL=jdbc:sqlserver://meta-db-host;databaseName=scheduler_meta \
+  -DDB_USERNAME=scheduler_app \
+  -DDB_PASSWORD=*** \
+  -DMASTER_ENCRYPTION_KEY=*** \
+  -DJWT_SIGNING_KEY=*** \
+  -DINITIAL_ADMIN_USERNAME=admin \
+  -DINITIAL_ADMIN_PASSWORD=*** \
+  -DCORS_ALLOWED_ORIGIN=http://localhost:5173"
+```
+
+`setenv.bat` (Windows):
+```bat
+set "JAVA_OPTS=%JAVA_OPTS% -DDB_URL=jdbc:sqlserver://meta-db-host;databaseName=scheduler_meta -DDB_USERNAME=scheduler_app -DDB_PASSWORD=*** -DMASTER_ENCRYPTION_KEY=*** -DJWT_SIGNING_KEY=*** -DINITIAL_ADMIN_USERNAME=admin -DINITIAL_ADMIN_PASSWORD=*** -DCORS_ALLOWED_ORIGIN=http://localhost:5173"
+```
+
+**특수문자 인용 주의**: `MASTER_ENCRYPTION_KEY`/`JWT_SIGNING_KEY`는 base64 값이라 `+`, `/`, `=` 같은 문자가 포함된다. `setenv.sh`에서는 값 전체를 더블쿼트(`"..."`)로 감싸는 한 `+`/`=`는 셸 특수문자가 아니라서 안전하지만(위 예시처럼), 값을 다시 작은따옴표로 중첩하거나 백틱으로 감싸면 깨질 수 있으니 예시 형태를 그대로 따를 것. `setenv.bat`에서는 `%`가 배치 변수 치환 문자이므로 값에 `%`가 들어가면 반드시 `%%`로 escape해야 하고(base64는 보통 `%`를 포함하지 않지만 다른 값, 예를 들어 비밀번호에 `%`가 들어가면 문제가 됨), `set "..."` 형태(전체를 쿼트)로 양쪽 끝을 감싸는 위 예시 형태를 유지할 것 — 쿼트 없이 `set JAVA_OPTS=...`로 쓰면 `&`, `|`, `<`, `>` 같은 문자에서 배치 파서가 깨진다.
+
+### 4. Tomcat 기동/재기동 + 확인 포인트
+
+```bash
+$CATALINA_HOME/bin/shutdown.sh   # 이미 떠 있다면 먼저 종료 (재배치 시)
+$CATALINA_HOME/bin/startup.sh    # 또는 systemd/Windows 서비스로 등록된 Tomcat 재시작
+```
+
+기동 후 확인할 것:
+- `curl http://<host>:8080/` → 200, SPA의 `index.html`이 반환되는지(정적 자산이 WAR 안에 제대로 포함됐는지의 증거).
+- `curl http://<host>:8080/api/health` → 인증 없이 200(헬스체크 엔드포인트, `SecurityConfig`에서 `permitAll`).
+- `curl -i http://<host>:8080/api/schedules` (토큰 없이) → 401이 와야 함 — 200이 오면 `SecurityConfig`/`SpaWebConfig` 설정이 깨진 것.
+- 브라우저로 접속해 `INITIAL_ADMIN_USERNAME`/`INITIAL_ADMIN_PASSWORD`로 로그인 → 스케줄 목록 화면이 뜨는지(최초 기동 시 1회만 관리자 계정이 시드되므로, 두 번째 기동부터는 이 환경변수들이 더 이상 영향 없음).
+- Tomcat 로그(`$CATALINA_HOME/logs/catalina.out`)에 `DB_URL이 설정되지 않아...H2로 fallback` 경고가 찍히면 `-DDB_URL`이 빠진 것 — 운영에서는 반드시 실제 SQL Server `DB_URL`을 지정해야 한다.
+
 ## 다른 업체 재배포 체크리스트 (T13)
 
 이 프로젝트는 "같은 바이너리/빌드를 재컴파일 없이 다른 업체에 재배포"를 전제로 설계됨(PLAN.md §0). 아래 체크리스트의 값만 바꾸면 되고, **백엔드/프론트엔드 모두 소스 수정이나 재컴파일이 필요 없다.**
 
-### 백엔드 (`backend/`) — 재빌드한 jar/이미지를 그대로 재사용
+위 "운영 배포 (Tomcat, 단일 WAR)" 섹션의 통합 WAR로 배포하는 경우, 아래 프론트엔드 섹션의 "업체별로 `npm run build`를 따로 실행" 안내는 적용되지 않는다 — `VITE_API_BASE_URL`이 빈 값(상대경로)으로 고정된 그 **같은 WAR**를 그대로 재사용하면 되고(어떤 업체의 도메인에 배치하든 상대경로라 그대로 동작), 업체별로 바꿔야 하는 값은 아래 백엔드 섹션의 환경변수들뿐이다. 프론트엔드 섹션은 백엔드/프론트를 여전히 분리 배포하는 경우에만 해당.
+
+### 백엔드 (`backend/`) — 재빌드한 WAR를 그대로 재사용
 
 - [ ] `DB_URL`/`DB_USERNAME`/`DB_PASSWORD` — 그 업체의 메타DB(신규 스키마, Flyway가 기동 시 자동 적용). **`DB_URL`을 반드시 지정** — 생략하면 로컬 개발용 H2로 fallback되므로 실제 배포에서는 절대 비워두지 말 것
 - [ ] `MASTER_ENCRYPTION_KEY` — 업체별로 **새로 생성**(`openssl rand -base64 32`). 다른 배포와 재사용하지 않음(이 키가 다르면 기존 암호문을 복호화 못 함 — 재배포 = 새 메타DB + 새 키이므로 문제 없음)

@@ -118,6 +118,7 @@
   4. 수정(`PUT /api/schedules/{id}`)도 동일 코드경로(`validateTargetDbConfigIds` + `replaceForSchedule`)를 타므로 같은 방식으로 재현된다.
 - **영향 평가**: React SPA의 `TargetDbConfigMultiSelect`(체크박스 토글 방식)는 구조적으로 중복을 만들 수 없으므로, 공식 프론트엔드 경로로는 이 버그에 도달하지 않는다 — 실제로는 API를 직접 호출하는 경로(수동 테스트, 향후 통합, Postman 등)에서만 트리거된다. 그럼에도 "배열 검증이 모든 경로에서 일관되는지"를 명시적으로 요청받은 항목이고, 테스트 스위트(`ScheduleControllerTest`)에도 빈 배열·존재하지 않는 id 케이스는 있지만 중복 id 케이스는 없어(grep으로 확인, `createWithEmptyTargetDbConfigIdsIsBadRequest`/`createWithNonExistentTargetDbConfigIdIsBadRequest`만 존재) 이 경계가 테스트로 커버되지 않은 채 남아있다. 500 자체가 응답 바디에 평문 비밀값이나 스택트레이스를 노출하지는 않지만(Spring Boot 기본값), API 계약 관점에서 "검증 가능한 입력 오류"가 "서버 오류"로 분류되는 것은 명백한 결함이다.
 - **권장 수정 방향(참고용)**: `validateTargetDbConfigIds`에서 `targetDbConfigIds`에 `Set`으로 변환했을 때 크기가 줄어들면(중복 존재) 400을 던지거나, 아예 `replaceForSchedule` 호출 전에 `List.copyOf(new LinkedHashSet<>(ids))`로 묵묵히 중복 제거하는 두 방법 중 하나를 택하면 된다(전자가 "조용히 다른 동작을 하지 않는다"는 원칙에 더 맞는다).
+- **수정 완료**(`93be02d`): `validateTargetDbConfigIds`가 `LinkedHashSet` 변환 후 크기 비교로 중복을 400으로 명시 거부(권장안의 전자 방식). `createWithDuplicateTargetDbConfigIdsIsBadRequest`/`updateWithDuplicateTargetDbConfigIdsIsBadRequest`로 create/update 양쪽 재현 시나리오 테스트 확인, `mvn clean test` 118/118 그린.
 
 ### Minor
 
@@ -126,12 +127,14 @@
 - **위치**: `backend/src/main/java/com/scheduler/web/api/ScheduleController.java:83-89`(`create`), `:102-108`(`update`).
 - **문제**: `create`/`update` 모두 `scheduleRepository.save(...)`(또는 `update(...)`)와 `scheduleTargetDbConfigRepository.replaceForSchedule(...)`를 **별개의 두 호출**로 순서대로 실행한다. `replaceForSchedule` 자체는 `@Transactional`이 붙어 있어 그 내부(DELETE+batch INSERT)는 원자적이지만, "스케줄 행 저장"과 "대상DB 연결 교체" 사이를 묶는 상위 트랜잭션은 없다. 두 호출 사이에 `replaceForSchedule`이 실패하면(위 M4의 중복 id 케이스, 또는 검증 통과 후 다른 요청이 그 사이에 해당 `target_db_config`를 삭제하는 TOCTOU) `schedule_definition` 행은 이미 커밋된 채로 남고, 그 스케줄은 대상DB가 0개인 상태가 된다 — PLAN.md §4.3b가 "스케줄 생성/수정 시 최소 1개 이상의 대상DB가 선택되어야 한다(0개인 상태는 허용하지 않는다)"고 명시한 불변조건이 DB에 일시적으로 깨진 채 남을 수 있다.
 - **영향**: 발생 조건이 좁다(동시성 경합 또는 위 M4 같은 다른 버그와 겹쳐야 함)는 점에서 심각도는 낮다. 다만 `GenericScheduleJob`/`ScheduleExecutor`가 이 상태의 스케줄을 만나면 `targetDbResults`가 빈 리스트인 채로 `FAILURE`("선택된 대상DB가 없음")를 조용히 반복 기록하게 되어, 사용자가 관리자 화면에서 "분명히 대상DB를 선택했는데 계속 실패한다"는 혼란스러운 상태를 겪을 수 있다.
+- **수정 완료**(`aef01fd`): `create`/`update`에 `@Transactional` 추가. 신규 `ScheduleTargetDbTransactionTest`(`@MockitoSpyBean`으로 `replaceForSchedule`이 던지도록 스텁)가 create 경로에서 스케줄 행이 전혀 커밋되지 않음, update 경로에서 원본 값이 그대로 롤백됨을 확인(수정 전 먼저 재현 실패를 확인한 뒤 수정). `mvn clean test` 120/120 그린.
 
 #### N5. `ScheduleExecutor.executeForTargetDb`가 같은 `target_db_config`를 대상DB당 두 번 조회
 
 - **위치**: `backend/src/main/java/com/scheduler/engine/execution/ScheduleExecutor.java:131-158`.
 - **문제**: `targetDbConfigName`을 구하기 위해 `targetDbConfigRepository.findById(targetDbConfigId)`를 먼저 호출(실패 시 `"target-db-" + id`로 폴백)하고, 바로 이어서 `try` 블록 안에서 **같은 id로 다시** `targetDbConfigRepository.findById(targetDbConfigId)`를 호출해 `orElseThrow`한다. 기능적으로 틀린 것은 아니지만(이름 조회가 실패해도 실행 자체는 계속되고, 두 번째 조회가 진짜 존재 검증을 담당), 대상DB가 N개면 매 실행마다 불필요하게 2N번의 DB 조회가 발생한다. 또한 두 조회 사이의 아주 좁은 시간 창에서 해당 `target_db_config`가 삭제되면(동시에 다른 관리자가 그 대상DB를 지우려는, TargetDbConfigController의 참조-차단이 걸려 있어 실제로는 거의 불가능하지만) 첫 조회는 이름을 얻고 두 번째 조회는 `NoSuchElementException`을 던지는 미세한 비일관 상태가 가능하다.
 - **영향**: 순수 성능/미화 이슈에 가깝다 — 대상DB 수가 "소수"라는 §0 전제(단일 업체, 보통 1~2개)에서는 체감 영향이 거의 없다. 심각도를 minor로 유지.
+- **수정 완료**(`57d9b03`): `findById`를 한 번만 호출해 `Optional<TargetDbConfig>`를 지역변수로 재사용, 이름 조회 실패 시 폴백 동작은 그대로 유지. 순수 리팩터링이라 별도 테스트 없이 기존 `ScheduleExecutorTest` 전체 통과로 동작 불변 확인.
 
 ### N:M 전환 정합성 — 확인된 사항 (문제 없음)
 

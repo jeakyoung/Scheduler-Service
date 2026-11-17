@@ -137,11 +137,18 @@ public class ScheduleController {
     }
 
     /**
-     * @NotEmpty on the request DTO already rejects an empty array; this catches the other
-     * 400 case PLAN.md §6 calls for - an id that doesn't exist - before replaceForSchedule
-     * would otherwise hit it as an FK violation (500, not 400).
+     * @NotEmpty on the request DTO already rejects an empty array; this catches the other two
+     * 400 cases PLAN.md §6/REVIEW.md M4 call for - a duplicate id, and an id that doesn't
+     * exist - before replaceForSchedule would otherwise hit either as a composite-PK/FK
+     * violation (500, not 400). Duplicates are rejected outright rather than silently
+     * deduplicated (REVIEW.md M4's "don't silently do something else" principle).
      */
     private void validateTargetDbConfigIds(List<Long> targetDbConfigIds) {
+        java.util.Set<Long> distinct = new java.util.LinkedHashSet<>(targetDbConfigIds);
+        if (distinct.size() < targetDbConfigIds.size()) {
+            throw new IllegalArgumentException("target_db_config ids must not contain duplicates: " + targetDbConfigIds);
+        }
+
         List<Long> missing = targetDbConfigIds.stream()
                 .filter(id -> targetDbConfigRepository.findById(id).isEmpty())
                 .toList();

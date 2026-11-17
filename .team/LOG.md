@@ -411,3 +411,9 @@
 - **Major 1건(수정 필요) — M4**: `targetDbConfigIds`에 같은 id가 중복으로 들어오면(예: `[5,5]`) `validateTargetDbConfigIds`가 "존재 여부"만 검사하고 "중복"은 안 걸러내서, `replaceForSchedule`의 복합PK 위반 예외가 핸들러 없이 그대로 전파돼 **400이 아니라 500**이 남. 공식 React SPA 경로(체크박스 다중선택)로는 구조적으로 도달 불가하지만, API 직접 호출 시 재현되는 명백한 검증 공백.
 - **Minor 2건(선택 수정)**: N4(스케줄 저장과 `replaceForSchedule`이 하나의 트랜잭션으로 안 묶여 있어, 중간에 실패 시 "대상DB 0개" 불변조건 위반 상태가 일시적으로 남을 수 있음), N5(`ScheduleExecutor.executeForTargetDb`가 같은 `target_db_config`를 대상DB당 2번 조회하는 비효율).
 - 다음 단계: sched-worker에게 M4(필수) + N4/N5(가능하면 같이) 수정 지시.
+
+## 2026-11-17 — REVIEW.md M4 수정: targetDbConfigIds 중복 id 검증 추가 (worker)
+- `ScheduleController.validateTargetDbConfigIds`가 "존재 여부"만 검사하고 "중복 원소"는 걸러내지 않아서, 중복 id(예: `[5,5]`)가 들어오면 `replaceForSchedule`의 복합PK 위반 예외가 `ApiExceptionHandler`에 핸들러 없이 전파돼 500이 나던 버그. REVIEW.md가 제안한 두 방법("조용히 중복 제거" vs "명확히 400 거부") 중 후자를 선택 — `Set`(정확히는 `LinkedHashSet`)으로 변환했을 때 크기가 원래 리스트보다 줄어들면 `IllegalArgumentException`(→ 기존 `ApiExceptionHandler`가 400으로 매핑)을 던지도록 `validateTargetDbConfigIds` 맨 앞에 중복 검사 추가(존재 여부 검사보다 먼저 수행).
+- 테스트: `ScheduleControllerTest`에 `createWithDuplicateTargetDbConfigIdsIsBadRequest`/`updateWithDuplicateTargetDbConfigIdsIsBadRequest` 2개 추가 — 둘 다 같은 id를 두 번 넣어 생성/수정 시도 → 400 확인(REVIEW.md 재현 시나리오 그대로, create/update 양쪽 경로 전부).
+- DoD 점검: `mvn clean test` 전체 **118개 테스트 그린**(이번 수정만 단독으로 격리해 확인 — N4 관련 신규 테스트 파일은 별도 커밋에서 추가할 예정이라 이번 실행에는 포함하지 않음). `mvn clean package`는 N4/N5까지 전부 끝난 뒤 최종 1회로 재확인할 예정.
+- 다음 작업: N4(스케줄 저장과 `replaceForSchedule`를 하나의 트랜잭션으로 묶기).

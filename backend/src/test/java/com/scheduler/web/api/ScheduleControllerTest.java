@@ -176,6 +176,48 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
     }
 
     @Test
+    void createWithDuplicateTargetDbConfigIdsIsBadRequest() throws Exception {
+        // REVIEW.md M4: a duplicate id used to pass validation (both elements "exist") and
+        // only fail later inside replaceForSchedule's composite-PK insert, surfacing as an
+        // unhandled 500 instead of a clean 400.
+        String body = """
+                {
+                  "name": "Duplicate target DB ids",
+                  "enabled": true,
+                  "cronExpression": "0 0 9 ? * MON",
+                  "timezone": "Asia/Seoul",
+                  "spName": "SP_SAMPLE",
+                  "targetDbConfigIds": [%d, %d],
+                  "actionType": "DISPLAY_ONLY",
+                  "actionConfig": {"displayFormat": "TABLE"}
+                }
+                """.formatted(targetDbConfigId, targetDbConfigId);
+
+        mockMvc.perform(post("/api/schedules").contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void updateWithDuplicateTargetDbConfigIdsIsBadRequest() throws Exception {
+        long id = createSchedule(true, "0 0 9 ? * MON");
+        String body = """
+                {
+                  "name": "Duplicate target DB ids on update",
+                  "enabled": true,
+                  "cronExpression": "0 0 9 ? * MON",
+                  "timezone": "Asia/Seoul",
+                  "spName": "SP_SAMPLE",
+                  "targetDbConfigIds": [%d, %d],
+                  "actionType": "DISPLAY_ONLY",
+                  "actionConfig": {"displayFormat": "TABLE"}
+                }
+                """.formatted(targetDbConfigId, targetDbConfigId);
+
+        mockMvc.perform(put("/api/schedules/" + id).contentType(MediaType.APPLICATION_JSON).content(body))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void createAndListResolveTargetDbConfigNamesForMultipleTargets() throws Exception {
         TargetDbConfig secondConfig = targetDbConfigRepository.save(new TargetDbConfig(
                 null, "Second Target DB", "jdbc:sqlserver://second-business-db;", "biz_user2", "pw", null, null

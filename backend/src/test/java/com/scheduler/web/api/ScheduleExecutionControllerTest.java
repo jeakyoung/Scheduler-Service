@@ -15,9 +15,14 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.test.context.support.WithMockUser;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import com.sun.net.httpserver.HttpServer;
 
+import java.net.InetSocketAddress;
+import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -203,5 +208,83 @@ class ScheduleExecutionControllerTest extends AbstractQuartzIntegrationTest {
         firstRun.join(TimeUnit.SECONDS.toMillis(10));
         assertThat(firstRun.isAlive()).isFalse();
         assertThat(backgroundError.get()).isNull();
+    }
+
+    /**
+     * T21 (TASKS.md) - multi-target-DB API_CALL scenario, end-to-end through the real
+     * run-now REST endpoint (not a ScheduleExecutor-level unit test like T17's). Both target
+     * DBs point at the same shared Testcontainers MSSQL instance (same convention as the rest
+     * of this class) since SP_TEST_SAMPLE only needs to exist once - sequential visiting order
+     * is schedule_target_db_config's ORDER BY target_db_config_id (T16), so the first-created
+     * config's single HTTP call lands first (200), the second-created config's lands second
+     * (500), deterministically producing one success and one failure.
+     */
+    @Test
+    void runNowWithTwoTargetDbsAndApiCallOneFailureYieldsPartialSuccess() throws Exception {
+        List<String> receivedBodies = new CopyOnWriteArrayList<>();
+        AtomicInteger callCount = new AtomicInteger();
+        int[] responseStatusesInOrder = {200, 500};
+
+        HttpServer httpServer = HttpServer.create(new InetSocketAddress("localhost", 0), 0);
+        httpServer.createContext("/push", exchange -> {
+            receivedBodies.add(new String(exchange.getRequestBody().readAllBytes()));
+            int index = Math.min(callCount.getAndIncrement(), responseStatusesInOrder.length - 1);
+            byte[] response = "{}".getBytes();
+            exchange.sendResponseHeaders(responseStatusesInOrder[index], response.length);
+            exchange.getResponseBody().write(response);
+            exchange.close();
+        });
+        httpServer.start();
+        try {
+            String pushUrl = "http://localhost:" + httpServer.getAddress().getPort() + "/push";
+
+            TargetDbConfig secondConfig = targetDbConfigRepository.save(new TargetDbConfig(
+                    null, "Second same-container target DB",
+                    MSSQL.getJdbcUrl() + ";trustServerCertificate=true;",
+                    MSSQL.getUsername(), MSSQL.getPassword(), null, null
+            ));
+
+            String body = """
+                    {
+                      "name": "Multi target API_CALL schedule",
+                      "enabled": false,
+                      "cronExpression": "0 0 9 ? * MON",
+                      "timezone": "Asia/Seoul",
+                      "spName": "SP_TEST_SAMPLE",
+                      "targetDbConfigIds": [%d, %d],
+                      "actionType": "API_CALL",
+                      "actionConfig": {
+                        "method": "POST",
+                        "url": "%s",
+                        "headers": {},
+                        "groupingMode": "PER_ROW",
+                        "bodyTemplate": "{\\"empList\\":[\\"${EMPLOYEE_NO}\\"]}"
+                      }
+                    }
+                    """.formatted(targetDbConfigId, secondConfig.id(), pushUrl);
+
+            String createResponse = mockMvc.perform(post("/api/schedules")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(body))
+                    .andExpect(status().isCreated())
+                    .andReturn().getResponse().getContentAsString();
+            long id = objectMapper.readTree(createResponse).get("id").asLong();
+
+            String runNowResponse = mockMvc.perform(post("/api/schedules/" + id + "/run-now"))
+                    .andExpect(status().isOk())
+                    .andReturn().getResponse().getContentAsString();
+
+            JsonNode node = objectMapper.readTree(runNowResponse);
+            assertThat(node.at("/result/status").asText()).isEqualTo("PARTIAL_SUCCESS");
+            assertThat(node.at("/result/targetDbResults")).hasSize(2);
+            assertThat(node.at("/result/targetDbResults/0/targetDbConfigId").asLong()).isEqualTo(targetDbConfigId);
+            assertThat(node.at("/result/targetDbResults/0/status").asText()).isEqualTo("SUCCESS");
+            assertThat(node.at("/result/targetDbResults/1/targetDbConfigId").asLong()).isEqualTo(secondConfig.id());
+            assertThat(node.at("/result/targetDbResults/1/status").asText()).isEqualTo("FAILURE");
+            assertThat(node.at("/result/targetDbResults/1/errorMessage").asText()).contains("HTTP 500");
+            assertThat(receivedBodies).hasSize(2);
+        } finally {
+            httpServer.stop(0);
+        }
     }
 }

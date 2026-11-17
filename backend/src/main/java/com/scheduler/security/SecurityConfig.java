@@ -63,7 +63,13 @@ public class SecurityConfig {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
                         .requestMatchers("/api/auth/login", "/api/health").permitAll()
-                        .anyRequest().authenticated()
+                        .requestMatchers("/api/**").authenticated()
+                        // Everything else is the SPA shell (index.html, JS/CSS/etc. under
+                        // SpaWebConfig's fallback) - it must be publicly reachable or nobody
+                        // could even load the login page. Only /api/** carries real data and
+                        // stays behind auth. Found via T24's actual MockMvc regression test:
+                        // the previous anyRequest().authenticated() 401'd static assets too.
+                        .anyRequest().permitAll()
                 )
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
         }

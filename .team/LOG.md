@@ -461,3 +461,11 @@
 - 뒷정리: Maven이 다운로드한 `frontend/node/`(Node/npm 바이너리)가 `frontend/.gitignore`에 빠져 있어 `git status`에 untracked로 잡히는 것을 발견 → `/node/` 패턴 추가. 이후 시스템 node로 `npm install`/`npm test` 재실행해 평소 프론트 개발 워크플로(25/25 테스트 그린)에 영향 없음을 재확인.
 - DoD 점검: 위 "깨끗한 환경" 실측 검증 통과, `mvn clean package`(정상 환경) 120/120 + WAR 구조 확인, `mvn test` 단독 실행 시 프론트 빌드 미개입 확인.
 - 다음 작업: T24(SPA 폴백 라우팅) — `src/test/resources/static/` 테스트 픽스처 전략을 적용해야 함(위에서 미리 밝혀둔 제약).
+
+## 2026-11-17 — T24: SPA 폴백 라우팅 (worker)
+- PLAN.md §11.3/TASKS.md T24. `backend/src/main/java/com/scheduler/web/SpaWebConfig.java` 신설: `WebMvcConfigurer.addResourceHandlers`로 `/**` → `classpath:/static/` 매핑 + `PathResourceResolver` 오버라이드로 요청 리소스가 없으면 `classpath:/static/index.html`로 폴백.
+- T23에서 미리 밝혀둔 제약대로, 실제 npm 빌드 결과(`target/classes/static`, prepare-package 단계에서만 생성됨) 대신 `backend/src/test/resources/static/`에 테스트 전용 픽스처(`index.html`, `assets/app.js`)를 신설 — `mvn test`만으로도(프론트 빌드 없이) T24 테스트가 100% 재현 가능.
+- `SpaFallbackIntegrationTest`(`AbstractRepositoryIntegrationTest` 상속, MSSQL testcontainer) 3개 테스트로 TASKS.md DoD 3항목을 그대로 구현: (1) `GET /schedules`(확장자 없는 미존재 경로) → 200 + index.html 픽스처 내용, (2) `GET /assets/app.js`(실제 존재하는 정적 자산) → 200 + 그 파일 내용 그대로(index.html로 대체 안 됨), (3) 인증 없이 `GET /api/schedules` → 401(200 index.html 아님).
+- **실측 검증에서 실제 버그 발견(PLAN.md §11.3이 "암묵적 배제 가정"이라 명시하며 검증을 요구했던 지점과는 다른, 더 근본적인 문제)**: 처음 테스트 실행 시 (1),(2)가 401로 실패 — `/api/**`가 `RequestMappingHandlerMapping`에 먼저 매칭되어 배제된다는 가정 자체는 맞았지만, `SecurityConfig`의 기존 `anyRequest().authenticated()`가 `/api/**`가 아닌 **모든** 경로(즉 SPA 셸 자체, index.html/정적 자산 포함)에 인증을 요구하고 있어서 로그인 페이지를 로드하기 위한 첫 요청부터 401이 나는 구조적 문제였음. `SecurityConfig.securityFilterChain`을 `.requestMatchers("/api/**").authenticated()` + `.anyRequest().permitAll()`로 수정(프론트 정적 자산은 공개, `/api/**`만 인증 필요)해 해결. 수정 후 재실행 → 3개 테스트 모두 통과.
+- 전체 회귀: `mvn test` 123/123 그린(기존 120 + 신규 3), 기존 `AuthDisabledIntegrationTest`/`ScheduleControllerTest` 등 인증 관련 테스트도 전부 그대로 통과 — `/api/**`만 인증 범위를 유지하도록 좁힌 것이 다른 엔드포인트에 영향 없음을 확인.
+- DoD 점검: 통합 테스트 3종 모두 실측 통과(위 버그 수정 포함), `mvn test` 전체 그린. 다음 작업: T25(프론트엔드 API 베이스 URL 상대경로화).

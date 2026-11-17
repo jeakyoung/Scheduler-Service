@@ -21,13 +21,21 @@ export default function TargetDbConfigMultiSelect({ options, selectedIds, onChan
 
   return (
     <div>
-      {options.map((option) => (
-        <label key={option.id} style={{ display: "flex", width: "auto" }}>
-          <input type="checkbox" checked={selectedIds.includes(option.id)} onChange={() => toggle(option.id)} />
-          {option.name}
-        </label>
-      ))}
-      {selectedIds.length === 0 && <p className="error-text">최소 1개 이상의 대상 DB를 선택해야 합니다.</p>}
+      {options.length === 0 ? (
+        <p className="muted">등록된 대상 DB가 없습니다. 먼저 "대상 DB 설정"에서 추가해 주세요.</p>
+      ) : (
+        <div className="checkbox-list">
+          {options.map((option) => (
+            <label key={option.id}>
+              <input type="checkbox" checked={selectedIds.includes(option.id)} onChange={() => toggle(option.id)} />
+              {option.name}
+            </label>
+          ))}
+        </div>
+      )}
+      {options.length > 0 && selectedIds.length === 0 && (
+        <p className="error-text">최소 1개 이상의 대상 DB를 선택해야 합니다.</p>
+      )}
     </div>
   );
 }

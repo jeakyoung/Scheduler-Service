@@ -81,7 +81,7 @@ export default function CredentialPage() {
     <div>
       <div className="page-header">
         <h1>자격증명</h1>
-        <button type="button" onClick={startCreate}>
+        <button type="button" className="btn-primary" onClick={startCreate}>
           + 새 자격증명
         </button>
       </div>
@@ -102,7 +102,9 @@ export default function CredentialPage() {
             <input value={form.description ?? ""} onChange={(e) => setForm({ ...form, description: e.target.value })} />
           </label>
           <div className="form-actions">
-            <button type="submit">저장</button>
+            <button type="submit" className="btn-primary">
+              저장
+            </button>
             <button type="button" onClick={() => setShowForm(false)}>
               취소
             </button>
@@ -111,37 +113,43 @@ export default function CredentialPage() {
       )}
 
       {loading ? (
-        <p>불러오는 중...</p>
+        <p className="loading-text">
+          <span className="spinner" aria-hidden="true" /> 불러오는 중...
+        </p>
+      ) : credentials.length === 0 ? (
+        <p className="empty-state">등록된 자격증명이 없습니다. "+ 새 자격증명"으로 시작하세요.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>이름</th>
-              <th>값</th>
-              <th>설명</th>
-              <th>작업</th>
-            </tr>
-          </thead>
-          <tbody>
-            {credentials.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>
-                  <code>{c.maskedValue}</code>
-                </td>
-                <td>{c.description}</td>
-                <td className="actions">
-                  <button type="button" onClick={() => startEdit(c)}>
-                    수정
-                  </button>
-                  <button type="button" onClick={() => handleDelete(c)}>
-                    삭제
-                  </button>
-                </td>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>값</th>
+                <th>설명</th>
+                <th>작업</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {credentials.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>
+                    <code>{c.maskedValue}</code>
+                  </td>
+                  <td>{c.description}</td>
+                  <td className="actions">
+                    <button type="button" onClick={() => startEdit(c)}>
+                      수정
+                    </button>
+                    <button type="button" className="btn-danger" onClick={() => handleDelete(c)}>
+                      삭제
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

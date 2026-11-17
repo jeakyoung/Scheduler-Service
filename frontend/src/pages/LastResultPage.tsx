@@ -30,21 +30,27 @@ export default function LastResultPage() {
         이 화면은 프로세스 기동 이후의 최신 실행 1건만 보여주는 인메모리 캐시입니다 — 영속 이력이 아닙니다(재시작하면 사라집니다).
       </p>
 
-      {loading && <p>불러오는 중...</p>}
+      {loading && (
+        <p className="loading-text">
+          <span className="spinner" aria-hidden="true" /> 불러오는 중...
+        </p>
+      )}
       {error && <p className="error-text">{error}</p>}
 
-      {!loading && !error && !result && <p>아직 실행된 적이 없습니다.</p>}
+      {!loading && !error && !result && <p className="empty-state">아직 실행된 적이 없습니다.</p>}
 
       {result && (
         <div>
-          <p>
-            상태: <strong className={statusClassName(result.result.status)}>{statusLabel(result.result.status)}</strong>
-          </p>
-          <p>요약: {result.result.summary}</p>
-          {result.result.errorMessage && <p className="error-text">에러: {result.result.errorMessage}</p>}
-          <p className="muted">
-            트리거: {result.result.triggerType} / 시작: {result.result.startedAt} / 종료: {result.result.finishedAt}
-          </p>
+          <div className="result-summary">
+            <p>
+              상태: <strong className={statusClassName(result.result.status)}>{statusLabel(result.result.status)}</strong>
+            </p>
+            <p>요약: {result.result.summary}</p>
+            {result.result.errorMessage && <p className="error-text">에러: {result.result.errorMessage}</p>}
+            <p className="muted">
+              트리거: {result.result.triggerType} / 시작: {result.result.startedAt} / 종료: {result.result.finishedAt}
+            </p>
+          </div>
 
           <h2>대상 DB별 결과</h2>
           {result.result.targetDbResults.map((targetResult) => (

@@ -16,14 +16,16 @@ export default function RunResultModal({ scheduleName, result, onClose }: Props)
     <div className="modal-overlay" role="dialog" aria-modal="true">
       <div className="modal-box">
         <h2>실행 결과 — {scheduleName}</h2>
-        <p>
-          상태: <strong className={statusClassName(execution.status)}>{statusLabel(execution.status)}</strong>
-        </p>
-        <p>요약: {execution.summary}</p>
-        {execution.errorMessage && <p className="error-text">에러: {execution.errorMessage}</p>}
-        <p className="muted">
-          시작: {execution.startedAt} / 종료: {execution.finishedAt} ({execution.triggerType})
-        </p>
+        <div className="result-summary">
+          <p>
+            상태: <strong className={statusClassName(execution.status)}>{statusLabel(execution.status)}</strong>
+          </p>
+          <p>요약: {execution.summary}</p>
+          {execution.errorMessage && <p className="error-text">에러: {execution.errorMessage}</p>}
+          <p className="muted">
+            시작: {execution.startedAt} / 종료: {execution.finishedAt} ({execution.triggerType})
+          </p>
+        </div>
 
         <h3>대상 DB별 결과</h3>
         {execution.targetDbResults.map((targetResult) => (

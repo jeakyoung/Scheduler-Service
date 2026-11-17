@@ -26,6 +26,9 @@ export default function ParameterEditor({ parameters, onChange }: Props) {
 
   return (
     <div>
+      {parameters.length === 0 && (
+        <p className="muted">파라미터가 없습니다 (파라미터 없는 EXEC로 호출됩니다).</p>
+      )}
       <table>
         <thead>
           <tr>
@@ -72,7 +75,7 @@ export default function ParameterEditor({ parameters, onChange }: Props) {
                 )}
               </td>
               <td>
-                <button type="button" onClick={() => removeRow(index)}>
+                <button type="button" className="btn-danger btn-sm" onClick={() => removeRow(index)}>
                   삭제
                 </button>
               </td>

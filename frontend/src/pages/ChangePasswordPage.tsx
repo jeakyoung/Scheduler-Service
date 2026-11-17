@@ -57,7 +57,7 @@ export default function ChangePasswordPage() {
         </label>
         {error && <p className="error-text">{error}</p>}
         {success && <p className="status-success">비밀번호가 변경되었습니다.</p>}
-        <button type="submit" disabled={submitting}>
+        <button type="submit" className="btn-primary" disabled={submitting}>
           {submitting ? "변경 중..." : "변경"}
         </button>
       </form>

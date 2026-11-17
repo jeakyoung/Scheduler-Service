@@ -264,9 +264,9 @@ function DayPicker({
   }
 
   return (
-    <div>
+    <div className="checkbox-list-inline">
       {ALL_DAYS.map((day) => (
-        <label key={day} style={{ display: "inline-flex", width: "auto", marginRight: 8 }}>
+        <label key={day}>
           <input type="checkbox" checked={days.includes(day)} onChange={() => toggle(day)} />
           {DAY_LABELS[day]}
         </label>

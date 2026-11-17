@@ -70,7 +70,7 @@ export default function TargetDbConfigPage() {
     <div>
       <div className="page-header">
         <h1>대상 DB 설정</h1>
-        <button type="button" onClick={startCreate}>
+        <button type="button" className="btn-primary" onClick={startCreate}>
           + 새 대상 DB
         </button>
       </div>
@@ -100,7 +100,9 @@ export default function TargetDbConfigPage() {
             <input type="password" value={form.password} onChange={(e) => setForm({ ...form, password: e.target.value })} required />
           </label>
           <div className="form-actions">
-            <button type="submit">저장</button>
+            <button type="submit" className="btn-primary">
+              저장
+            </button>
             <button type="button" onClick={() => setShowForm(false)}>
               취소
             </button>
@@ -109,39 +111,45 @@ export default function TargetDbConfigPage() {
       )}
 
       {loading ? (
-        <p>불러오는 중...</p>
+        <p className="loading-text">
+          <span className="spinner" aria-hidden="true" /> 불러오는 중...
+        </p>
+      ) : configs.length === 0 ? (
+        <p className="empty-state">등록된 대상 DB가 없습니다. "+ 새 대상 DB"로 시작하세요.</p>
       ) : (
-        <table>
-          <thead>
-            <tr>
-              <th>이름</th>
-              <th>JDBC URL</th>
-              <th>사용자명</th>
-              <th>비밀번호</th>
-              <th>작업</th>
-            </tr>
-          </thead>
-          <tbody>
-            {configs.map((c) => (
-              <tr key={c.id}>
-                <td>{c.name}</td>
-                <td>{c.jdbcUrl}</td>
-                <td>{c.username}</td>
-                <td>
-                  <code>{c.maskedPassword}</code>
-                </td>
-                <td className="actions">
-                  <button type="button" onClick={() => startEdit(c)}>
-                    수정
-                  </button>
-                  <button type="button" onClick={() => handleDelete(c)}>
-                    삭제
-                  </button>
-                </td>
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>JDBC URL</th>
+                <th>사용자명</th>
+                <th>비밀번호</th>
+                <th>작업</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {configs.map((c) => (
+                <tr key={c.id}>
+                  <td>{c.name}</td>
+                  <td>{c.jdbcUrl}</td>
+                  <td>{c.username}</td>
+                  <td>
+                    <code>{c.maskedPassword}</code>
+                  </td>
+                  <td className="actions">
+                    <button type="button" onClick={() => startEdit(c)}>
+                      수정
+                    </button>
+                    <button type="button" className="btn-danger" onClick={() => handleDelete(c)}>
+                      삭제
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
     </div>
   );

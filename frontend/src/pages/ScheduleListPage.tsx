@@ -80,74 +80,88 @@ export default function ScheduleListPage() {
     }
   }
 
-  if (loading) return <p>불러오는 중...</p>;
+  if (loading) {
+    return (
+      <p className="loading-text">
+        <span className="spinner" aria-hidden="true" /> 불러오는 중...
+      </p>
+    );
+  }
 
   return (
     <div>
       <div className="page-header">
         <h1>스케줄 목록</h1>
         <Link to="/schedules/new">
-          <button type="button">+ 새 스케줄</button>
+          <button type="button" className="btn-primary">
+            + 새 스케줄
+          </button>
         </Link>
       </div>
       {error && <p className="error-text">{error}</p>}
 
-      <table>
-        <thead>
-          <tr>
-            <th>이름</th>
-            <th>활성</th>
-            <th>Cron</th>
-            <th>대상 DB</th>
-            <th>다음 실행 예정</th>
-            <th>마지막 실행(캐시, 이력 아님)</th>
-            <th>작업</th>
-          </tr>
-        </thead>
-        <tbody>
-          {schedules.map((schedule) => {
-            const lastResult = lastResults[schedule.id];
-            return (
-              <tr key={schedule.id}>
-                <td>{schedule.name}</td>
-                <td>
-                  <input type="checkbox" checked={schedule.enabled} onChange={() => handleToggleEnabled(schedule)} />
-                </td>
-                <td>
-                  <code>{schedule.cronExpression}</code>
-                </td>
-                <td>
-                  {schedule.targetDbConfigs.map((config) => (
-                    <span key={config.id} className="badge-chip">
-                      {config.name}
-                    </span>
-                  ))}
-                </td>
-                <td>{schedule.nextFireTime ?? "-"}</td>
-                <td>
-                  {lastResult ? (
-                    <span className={statusClassName(lastResult.result.status)}>
-                      {statusLabel(lastResult.result.status)}
-                    </span>
-                  ) : (
-                    <span className="muted">없음</span>
-                  )}
-                </td>
-                <td className="actions">
-                  <button type="button" onClick={() => handleRunNow(schedule)} disabled={runningId === schedule.id}>
-                    {runningId === schedule.id ? "실행 중..." : "지금 실행"}
-                  </button>
-                  <Link to={`/schedules/${schedule.id}/edit`}>수정</Link>
-                  <Link to={`/schedules/${schedule.id}/last-result`}>최근 결과</Link>
-                  <button type="button" onClick={() => handleDelete(schedule)}>
-                    삭제
-                  </button>
-                </td>
+      {schedules.length === 0 ? (
+        <p className="empty-state">등록된 스케줄이 없습니다. "+ 새 스케줄"로 시작하세요.</p>
+      ) : (
+        <div className="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>이름</th>
+                <th>활성</th>
+                <th>Cron</th>
+                <th>대상 DB</th>
+                <th>다음 실행 예정</th>
+                <th>마지막 실행(캐시, 이력 아님)</th>
+                <th>작업</th>
               </tr>
-            );
-          })}
-        </tbody>
-      </table>
+            </thead>
+            <tbody>
+              {schedules.map((schedule) => {
+                const lastResult = lastResults[schedule.id];
+                return (
+                  <tr key={schedule.id}>
+                    <td>{schedule.name}</td>
+                    <td>
+                      <input type="checkbox" checked={schedule.enabled} onChange={() => handleToggleEnabled(schedule)} />
+                    </td>
+                    <td>
+                      <code>{schedule.cronExpression}</code>
+                    </td>
+                    <td>
+                      {schedule.targetDbConfigs.map((config) => (
+                        <span key={config.id} className="badge-chip">
+                          {config.name}
+                        </span>
+                      ))}
+                    </td>
+                    <td>{schedule.nextFireTime ?? "-"}</td>
+                    <td>
+                      {lastResult ? (
+                        <span className={statusClassName(lastResult.result.status)}>
+                          {statusLabel(lastResult.result.status)}
+                        </span>
+                      ) : (
+                        <span className="muted">없음</span>
+                      )}
+                    </td>
+                    <td className="actions">
+                      <button type="button" onClick={() => handleRunNow(schedule)} disabled={runningId === schedule.id}>
+                        {runningId === schedule.id ? "실행 중..." : "지금 실행"}
+                      </button>
+                      <Link to={`/schedules/${schedule.id}/edit`}>수정</Link>
+                      <Link to={`/schedules/${schedule.id}/last-result`}>최근 결과</Link>
+                      <button type="button" className="btn-danger" onClick={() => handleDelete(schedule)}>
+                        삭제
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {activeRunResult && (
         <RunResultModal

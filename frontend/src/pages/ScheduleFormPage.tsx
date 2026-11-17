@@ -130,7 +130,13 @@ export default function ScheduleFormPage() {
     }
   }
 
-  if (loading) return <p>불러오는 중...</p>;
+  if (loading) {
+    return (
+      <p className="loading-text">
+        <span className="spinner" aria-hidden="true" /> 불러오는 중...
+      </p>
+    );
+  }
 
   return (
     <div>
@@ -195,7 +201,7 @@ export default function ScheduleFormPage() {
         {error && <p className="error-text">{error}</p>}
 
         <div className="form-actions">
-          <button type="submit" disabled={saving}>
+          <button type="submit" className="btn-primary" disabled={saving}>
             {saving ? "저장 중..." : "저장"}
           </button>
           <button type="button" onClick={() => navigate("/schedules")}>

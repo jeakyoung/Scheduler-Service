@@ -70,7 +70,7 @@ export default function ActionConfigEditor({
                 list="credential-names"
                 onChange={(e) => updateHeader(index, key, e.target.value)}
               />
-              <button type="button" onClick={() => removeHeader(index)}>
+              <button type="button" className="btn-danger btn-sm" onClick={() => removeHeader(index)}>
                 삭제
               </button>
             </div>

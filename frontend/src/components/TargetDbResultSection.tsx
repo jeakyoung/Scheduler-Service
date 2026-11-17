@@ -12,8 +12,13 @@ interface Props {
  * and LastResultPage so both render target DBs identically, never merging their rows (§5).
  */
 export default function TargetDbResultSection({ targetResult, displayOutput }: Props) {
+  // A single target DB's status is always SUCCESS or FAILURE (never PARTIAL_SUCCESS - that
+  // only exists once multiple of these are combined), so the modifier class name maps
+  // 1:1 onto statusClassName's "status-success"/"status-failure".
+  const accentClass = targetResult.status === "SUCCESS" ? "target-db-section--success" : "target-db-section--failure";
+
   return (
-    <div className="target-db-section">
+    <div className={`target-db-section ${accentClass}`}>
       <p>
         <strong>{targetResult.targetDbConfigName}</strong>{" "}
         <span className={statusClassName(targetResult.status)}>{statusLabel(targetResult.status)}</span>

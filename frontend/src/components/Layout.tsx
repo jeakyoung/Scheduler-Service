@@ -19,7 +19,7 @@ export default function Layout() {
         <NavLink to="/credentials">자격증명</NavLink>
         <NavLink to="/change-password">비밀번호 변경</NavLink>
         <span className="app-nav-spacer" />
-        <span>{user?.username}</span>
+        <span className="app-nav-user">{user?.username}</span>
         <button type="button" onClick={handleLogout}>
           로그아웃
         </button>

@@ -24,7 +24,14 @@
     <version>0.1.0-SNAPSHOT</version>
     <name>scheduler-service</name>
     <description>General-purpose scheduling service (schedule definitions in DB, Quartz-driven execution)</description>
-    <packaging>jar</packaging>
+    <!--
+      jar -> war (PLAN.md §11.1, 2026-11-17): the only deployable infrastructure available is
+      an external Tomcat, so the previous "backend jar with embedded Tomcat" deployment shape
+      is replaced with a single deployable WAR. mvn spring-boot:run (local dev) still works
+      with this packaging + the provided-scope spring-boot-starter-tomcat below - verified in
+      T22's DoD, not just assumed from the Spring Boot docs' "deployable WAR" pattern.
+    -->
+    <packaging>war</packaging>
 
     <properties>
         <java.version>17</java.version>
@@ -41,6 +48,19 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <!--
+          Explicit provided-scope override (PLAN.md §11.1) - spring-boot-starter-web already
+          pulls this in transitively, but at its normal (compile) scope it would end up
+          bundled inside WEB-INF/lib of the WAR and clash with the external Tomcat's own
+          servlet container classes. provided keeps it on the compile/test/local-run classpath
+          (so `mvn spring-boot:run`'s embedded Tomcat still works) while excluding it from the
+          packaged WAR.
+        -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-tomcat</artifactId>
+            <scope>provided</scope>
         </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>

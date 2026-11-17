@@ -7,6 +7,7 @@
   --accent: #6633cc;
   --danger: #c0392b;
   --success: #1f8a4c;
+  --partial: #b7791f;
 
   --sans: system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: ui-monospace, Consolas, monospace;
@@ -119,9 +120,30 @@ th {
   color: var(--success);
   font-weight: 600;
 }
+.status-partial {
+  color: var(--partial);
+  font-weight: 600;
+}
 .status-failure {
   color: var(--danger);
   font-weight: 600;
+}
+
+.badge-chip {
+  display: inline-block;
+  background: var(--code-bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 2px 10px;
+  margin: 2px 4px 2px 0;
+  font-size: 13px;
+}
+
+.target-db-section {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin: 12px 0;
 }
 
 .page-header {

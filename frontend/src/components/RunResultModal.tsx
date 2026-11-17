@@ -1,4 +1,6 @@
 import type { RunResult } from "../api/types";
+import { statusClassName, statusLabel } from "./statusBadge";
+import TargetDbResultSection from "./TargetDbResultSection";
 
 interface Props {
   scheduleName: string;
@@ -15,10 +17,7 @@ export default function RunResultModal({ scheduleName, result, onClose }: Props)
       <div className="modal-box">
         <h2>실행 결과 — {scheduleName}</h2>
         <p>
-          상태:{" "}
-          <strong className={execution.status === "SUCCESS" ? "status-success" : "status-failure"}>
-            {execution.status === "SUCCESS" ? "성공" : "실패"}
-          </strong>
+          상태: <strong className={statusClassName(execution.status)}>{statusLabel(execution.status)}</strong>
         </p>
         <p>요약: {execution.summary}</p>
         {execution.errorMessage && <p className="error-text">에러: {execution.errorMessage}</p>}
@@ -26,30 +25,13 @@ export default function RunResultModal({ scheduleName, result, onClose }: Props)
           시작: {execution.startedAt} / 종료: {execution.finishedAt} ({execution.triggerType})
         </p>
 
-        {/* One table per target DB - never merged (PLAN.md §3.3/§5). T20 adds a fuller
-            per-target-DB section (status badge, summary/errorMessage) around this. */}
-        {displayOutputs.map((displayOutput) => (
-          <div key={displayOutput.targetDbConfigId} className="table-scroll">
-            <h3>{displayOutput.targetDbConfigName}</h3>
-            <table>
-              <thead>
-                <tr>
-                  {displayOutput.columns.map((column) => (
-                    <th key={column}>{column}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {displayOutput.rows.map((row, index) => (
-                  <tr key={index}>
-                    {displayOutput.columns.map((column) => (
-                      <td key={column}>{String(row[column] ?? "")}</td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+        <h3>대상 DB별 결과</h3>
+        {execution.targetDbResults.map((targetResult) => (
+          <TargetDbResultSection
+            key={targetResult.targetDbConfigId}
+            targetResult={targetResult}
+            displayOutput={displayOutputs.find((output) => output.targetDbConfigId === targetResult.targetDbConfigId)}
+          />
         ))}
 
         <button type="button" onClick={onClose}>

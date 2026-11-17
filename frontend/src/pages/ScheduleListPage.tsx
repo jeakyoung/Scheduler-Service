@@ -4,6 +4,7 @@ import { scheduleApi } from "../api/schedules";
 import type { RunResult, Schedule } from "../api/types";
 import RunResultModal from "../components/RunResultModal";
 import { ApiError } from "../api/client";
+import { statusClassName, statusLabel } from "../components/statusBadge";
 
 /** PLAN.md §7 item 2 - enabled 토글, cron, 다음 실행 예정시각, 마지막 실행 상태(인메모리 캐시 기반), "지금 실행". */
 export default function ScheduleListPage() {
@@ -97,6 +98,7 @@ export default function ScheduleListPage() {
             <th>이름</th>
             <th>활성</th>
             <th>Cron</th>
+            <th>대상 DB</th>
             <th>다음 실행 예정</th>
             <th>마지막 실행(캐시, 이력 아님)</th>
             <th>작업</th>
@@ -114,11 +116,18 @@ export default function ScheduleListPage() {
                 <td>
                   <code>{schedule.cronExpression}</code>
                 </td>
+                <td>
+                  {schedule.targetDbConfigs.map((config) => (
+                    <span key={config.id} className="badge-chip">
+                      {config.name}
+                    </span>
+                  ))}
+                </td>
                 <td>{schedule.nextFireTime ?? "-"}</td>
                 <td>
                   {lastResult ? (
-                    <span className={lastResult.result.status === "SUCCESS" ? "status-success" : "status-failure"}>
-                      {lastResult.result.status === "SUCCESS" ? "성공" : "실패"}
+                    <span className={statusClassName(lastResult.result.status)}>
+                      {statusLabel(lastResult.result.status)}
                     </span>
                   ) : (
                     <span className="muted">없음</span>

@@ -14,6 +14,7 @@ import type {
 import ActionConfigEditor from "../components/ActionConfigEditor";
 import ParameterEditor from "../components/ParameterEditor";
 import CronBuilder from "../components/CronBuilder";
+import TargetDbConfigMultiSelect from "../components/TargetDbConfigMultiSelect";
 
 const EMPTY_API_CALL: ApiCallActionConfig = {
   method: "POST",
@@ -40,7 +41,7 @@ export default function ScheduleFormPage() {
   const [cronExpression, setCronExpression] = useState("");
   const [timezone, setTimezone] = useState("Asia/Seoul");
   const [spName, setSpName] = useState("");
-  const [targetDbConfigId, setTargetDbConfigId] = useState<number | "">("");
+  const [targetDbConfigIds, setTargetDbConfigIds] = useState<number[]>([]);
   const [actionType, setActionType] = useState<ActionType>("DISPLAY_ONLY");
   const [apiCallConfig, setApiCallConfig] = useState<ApiCallActionConfig>(EMPTY_API_CALL);
   const [displayOnlyConfig, setDisplayOnlyConfig] = useState<DisplayOnlyActionConfig>(EMPTY_DISPLAY_ONLY);
@@ -68,10 +69,7 @@ export default function ScheduleFormPage() {
           setCronExpression(schedule.cronExpression);
           setTimezone(schedule.timezone);
           setSpName(schedule.spName);
-          // T20 replaces this single-select with a real multi-select
-          // (TargetDbConfigMultiSelect) sending the full targetDbConfigIds array - for now
-          // this just shows/edits the first configured target DB.
-          setTargetDbConfigId(schedule.targetDbConfigIds[0] ?? "");
+          setTargetDbConfigIds(schedule.targetDbConfigIds);
           setActionType(schedule.actionType);
           setDescription(schedule.description ?? "");
           setParameters(
@@ -88,8 +86,6 @@ export default function ScheduleFormPage() {
           } else {
             setDisplayOnlyConfig(schedule.actionConfig as DisplayOnlyActionConfig);
           }
-        } else if (dbConfigs.length > 0) {
-          setTargetDbConfigId(dbConfigs[0].id);
         }
       } catch {
         setError("데이터를 불러오지 못했습니다.");
@@ -103,8 +99,8 @@ export default function ScheduleFormPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (targetDbConfigId === "") {
-      setError("대상 DB 설정을 선택해 주세요.");
+    if (targetDbConfigIds.length === 0) {
+      setError("대상 DB 설정을 최소 1개 이상 선택해 주세요.");
       return;
     }
 
@@ -117,7 +113,7 @@ export default function ScheduleFormPage() {
         cronExpression,
         timezone,
         spName,
-        targetDbConfigIds: [targetDbConfigId as number],
+        targetDbConfigIds,
         actionType,
         actionConfig: actionType === "API_CALL" ? apiCallConfig : displayOnlyConfig,
         description: description || null,
@@ -157,23 +153,14 @@ export default function ScheduleFormPage() {
           <input value={timezone} onChange={(e) => setTimezone(e.target.value)} required />
         </label>
 
-        <label>
-          대상 DB 설정
-          <select
-            value={targetDbConfigId}
-            onChange={(e) => setTargetDbConfigId(e.target.value === "" ? "" : Number(e.target.value))}
-            required
-          >
-            <option value="" disabled>
-              선택하세요
-            </option>
-            {targetDbConfigs.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <fieldset>
+          <legend>대상 DB 설정 (1개 이상 선택)</legend>
+          <TargetDbConfigMultiSelect
+            options={targetDbConfigs}
+            selectedIds={targetDbConfigIds}
+            onChange={setTargetDbConfigIds}
+          />
+        </fieldset>
 
         <label>
           SP 이름

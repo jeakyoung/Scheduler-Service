@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { scheduleApi } from "../api/schedules";
 import type { RunResult } from "../api/types";
+import { statusClassName, statusLabel } from "../components/statusBadge";
+import TargetDbResultSection from "../components/TargetDbResultSection";
 
 /** PLAN.md §7 item 5 - DisplayOutputStore/ExecutionResult 인메모리 캐시 열람, 영속 이력 아님 명시. */
 export default function LastResultPage() {
@@ -36,10 +38,7 @@ export default function LastResultPage() {
       {result && (
         <div>
           <p>
-            상태:{" "}
-            <strong className={result.result.status === "SUCCESS" ? "status-success" : "status-failure"}>
-              {result.result.status === "SUCCESS" ? "성공" : "실패"}
-            </strong>
+            상태: <strong className={statusClassName(result.result.status)}>{statusLabel(result.result.status)}</strong>
           </p>
           <p>요약: {result.result.summary}</p>
           {result.result.errorMessage && <p className="error-text">에러: {result.result.errorMessage}</p>}
@@ -47,30 +46,15 @@ export default function LastResultPage() {
             트리거: {result.result.triggerType} / 시작: {result.result.startedAt} / 종료: {result.result.finishedAt}
           </p>
 
-          {/* One table per target DB - never merged (PLAN.md §3.3/§5). T20 adds a fuller
-              per-target-DB section (status badge, summary/errorMessage) around this. */}
-          {result.displayOutputs.map((displayOutput) => (
-            <div key={displayOutput.targetDbConfigId} className="table-scroll">
-              <h2>{displayOutput.targetDbConfigName}</h2>
-              <table>
-                <thead>
-                  <tr>
-                    {displayOutput.columns.map((column) => (
-                      <th key={column}>{column}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {displayOutput.rows.map((row, index) => (
-                    <tr key={index}>
-                      {displayOutput.columns.map((column) => (
-                        <td key={column}>{String(row[column] ?? "")}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+          <h2>대상 DB별 결과</h2>
+          {result.result.targetDbResults.map((targetResult) => (
+            <TargetDbResultSection
+              key={targetResult.targetDbConfigId}
+              targetResult={targetResult}
+              displayOutput={result.displayOutputs.find(
+                (output) => output.targetDbConfigId === targetResult.targetDbConfigId
+              )}
+            />
           ))}
         </div>
       )}

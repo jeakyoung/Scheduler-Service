@@ -20,6 +20,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -131,11 +132,12 @@ public class ScheduleExecutor {
     private TargetDbExecutionResult executeForTargetDb(
             ScheduleDefinition schedule, long targetDbConfigId, List<Object> boundParams, ActionHandler handler
     ) {
-        String targetDbConfigName = targetDbConfigRepository.findById(targetDbConfigId)
-                .map(TargetDbConfig::name)
-                .orElse("target-db-" + targetDbConfigId);
+        // Looked up once (REVIEW.md N5 - this used to query by the same id twice: once for the
+        // name, once more inside the try block for the existence check/jdbcUrl).
+        Optional<TargetDbConfig> targetDbConfigLookup = targetDbConfigRepository.findById(targetDbConfigId);
+        String targetDbConfigName = targetDbConfigLookup.map(TargetDbConfig::name).orElse("target-db-" + targetDbConfigId);
         try {
-            TargetDbConfig targetDb = targetDbConfigRepository.findById(targetDbConfigId)
+            TargetDbConfig targetDb = targetDbConfigLookup
                     .orElseThrow(() -> new NoSuchElementException("target_db_config " + targetDbConfigId + " not found"));
 
             List<Map<String, Object>> spResultRows = storedProcedureInvoker.invoke(

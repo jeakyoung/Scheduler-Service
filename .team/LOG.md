@@ -424,3 +424,10 @@
 - MockMvc 관련 주의사항(테스트 작성 중 확인): `ApiExceptionHandler`에 핸들러가 없는 예외(`RuntimeException`)가 컨트롤러에서 발생하면 MockMvc는 이를 HTTP 500 응답으로 변환하지 않고 `ServletException`으로 감싸 테스트 코드 쪽에 그대로 던진다(실제 서블릿 컨테이너 배포 환경과 다른 동작) — 테스트는 `assertThatThrownBy(...).hasRootCauseMessage(...)`로 이 예외 자체를 검증하도록 작성(상태코드 검증이 아님).
 - DoD 점검: `mvn clean test` 전체 **120개 테스트 그린**(M4 커밋 이후 118 + 신규 2). `mvn clean package`는 N5까지 끝난 뒤 최종 1회로 재확인할 예정.
 - 다음 작업: N5(`ScheduleExecutor.executeForTargetDb`의 중복 조회 제거).
+
+## 2026-11-17 — REVIEW.md N5 수정: ScheduleExecutor.executeForTargetDb의 중복 target_db_config 조회 제거 (worker)
+- `executeForTargetDb`가 같은 `targetDbConfigId`로 `targetDbConfigRepository.findById(...)`를 두 번(이름 조회용 1번 + try 블록 안의 존재검증/jdbcUrl용 1번) 호출하던 비효율. 한 번 조회한 `Optional<TargetDbConfig>` 결과를 지역변수로 보관해 재사용하도록 정리 — 이름 조회 실패 시 `"target-db-" + id`로 폴백하던 기존 동작은 그대로 유지(동일한 `Optional`에서 `.map(...).orElse(...)`와 `.orElseThrow(...)`를 각각 호출하는 것으로, 로직 변화 없이 순수 리팩터링).
+- 별도 신규 테스트는 추가하지 않음(REVIEW.md도 "순수 성능/미화 이슈"로 분류, 동작 동일성은 기존 `ScheduleExecutorTest`의 success/failure/partial-success 시나리오들이 이미 커버) — 기존 테스트 전체가 수정 전후 동일하게 통과함으로 동작 불변을 확인.
+- DoD 점검: `mvn clean package`(test 포함) 전체 **120개 테스트 그린**(N4 이후 그대로, 이번 수정은 테스트 개수 변화 없음). M4/N4/N5 세 가지 모두 반영된 최종 상태로 재확인.
+- **REVIEW.md 2차 리뷰의 M4(필수)+N4+N5(권장) 전부 수정 완료.** 각각 별도 커밋: M4(`93be02d`), N4(`aef01fd`), N5(이번 커밋).
+- 다음 작업: 없음(요청 사항 전부 완료, 사용자 확인 대기). 전부 로컬 commit만 수행, push 없음.

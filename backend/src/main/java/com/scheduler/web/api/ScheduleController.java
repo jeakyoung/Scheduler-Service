@@ -27,6 +27,7 @@ import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -71,8 +72,15 @@ public class ScheduleController {
         return toResponse(schedule, scheduleParameterRepository.findByScheduleId(id));
     }
 
+    /**
+     * @Transactional wraps scheduleRepository.save(...) and replaceForSchedule(...) together
+     * (REVIEW.md N4) - without it, a failure in replaceForSchedule (e.g. a target_db_config
+     * deleted out from under this request) would leave an already-committed schedule row with
+     * zero target DBs, violating PLAN.md §4.3b's "at least one target DB" invariant.
+     */
     @PostMapping("/api/schedules")
     @ResponseStatus(HttpStatus.CREATED)
+    @Transactional
     public ScheduleResponse create(@Valid @RequestBody ScheduleRequest request, Authentication authentication) {
         String actionConfigJson = writeActionConfig(request.actionConfig());
         validateCron(request.cronExpression());
@@ -91,6 +99,7 @@ public class ScheduleController {
     }
 
     @PutMapping("/api/schedules/{id}")
+    @Transactional
     public ScheduleResponse update(@PathVariable long id, @Valid @RequestBody ScheduleRequest request, Authentication authentication) {
         requireSchedule(id);
         String actionConfigJson = writeActionConfig(request.actionConfig());

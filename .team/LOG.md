@@ -417,3 +417,10 @@
 - 테스트: `ScheduleControllerTest`에 `createWithDuplicateTargetDbConfigIdsIsBadRequest`/`updateWithDuplicateTargetDbConfigIdsIsBadRequest` 2개 추가 — 둘 다 같은 id를 두 번 넣어 생성/수정 시도 → 400 확인(REVIEW.md 재현 시나리오 그대로, create/update 양쪽 경로 전부).
 - DoD 점검: `mvn clean test` 전체 **118개 테스트 그린**(이번 수정만 단독으로 격리해 확인 — N4 관련 신규 테스트 파일은 별도 커밋에서 추가할 예정이라 이번 실행에는 포함하지 않음). `mvn clean package`는 N4/N5까지 전부 끝난 뒤 최종 1회로 재확인할 예정.
 - 다음 작업: N4(스케줄 저장과 `replaceForSchedule`를 하나의 트랜잭션으로 묶기).
+
+## 2026-11-17 — REVIEW.md N4 수정: 스케줄 생성/수정과 대상DB 연결 교체를 하나의 트랜잭션으로 묶음 (worker)
+- `ScheduleController.create`/`update`가 `scheduleRepository.save(...)`/`update(...)`와 `scheduleTargetDbConfigRepository.replaceForSchedule(...)`를 별개의 두 호출로 실행해서, 그 사이에 `replaceForSchedule`이 실패하면 이미 커밋된 스케줄 행이 대상DB 0개 상태로 남을 수 있는 버그(PLAN.md §4.3b의 "최소 1개 이상" 불변조건 위반). 사용자가 제안한 두 방법 중 간단한 쪽 — `create`/`update` 메서드에 `@Transactional` 추가.
+- 테스트: 신규 `ScheduleTargetDbTransactionTest`(별도 클래스 — `@MockitoSpyBean`으로 `ScheduleTargetDbConfigRepository`를 스파이해 `replaceForSchedule`이 의도적으로 예외를 던지도록 스텁, 빈 정의가 달라져 별도 Spring 컨텍스트 필요) — ① `create` 경로: `replaceForSchedule` 실패 시 `scheduleRepository.save`로 만들어진 스케줄 행이 전혀 존재하지 않음(커밋 안 됨) 확인, ② `update` 경로: `replaceForSchedule` 실패 시 스케줄의 이름/활성화/cron이 수정 전 원본 값 그대로 남아있음(롤백됨) 확인. **@Transactional을 일시적으로 제거하고 먼저 돌려봐서 두 테스트가 실제로 실패하는 것부터 확인**(버그 재현 → 수정 → 통과, 순서 그대로) — `create` 테스트는 "스케줄 행이 존재함"으로, `update` 테스트는 "이름이 변경된 값으로 남음"으로 정확히 예상대로 실패했었음.
+- MockMvc 관련 주의사항(테스트 작성 중 확인): `ApiExceptionHandler`에 핸들러가 없는 예외(`RuntimeException`)가 컨트롤러에서 발생하면 MockMvc는 이를 HTTP 500 응답으로 변환하지 않고 `ServletException`으로 감싸 테스트 코드 쪽에 그대로 던진다(실제 서블릿 컨테이너 배포 환경과 다른 동작) — 테스트는 `assertThatThrownBy(...).hasRootCauseMessage(...)`로 이 예외 자체를 검증하도록 작성(상태코드 검증이 아님).
+- DoD 점검: `mvn clean test` 전체 **120개 테스트 그린**(M4 커밋 이후 118 + 신규 2). `mvn clean package`는 N5까지 끝난 뒤 최종 1회로 재확인할 예정.
+- 다음 작업: N5(`ScheduleExecutor.executeForTargetDb`의 중복 조회 제거).

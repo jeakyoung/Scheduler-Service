@@ -96,3 +96,64 @@
 - **Major: 2건** (M1 SP명 SQL 인젝션, M2 짧은 비밀값 마스킹 실패) — 둘 다 "인증된 ADMIN"이라는 전제 안에서 발생하는 방어심층 결함이라 즉시 서비스 장애/외부 침해로 이어지는 것은 아니지만, PLAN.md가 명시적으로 걱정한 지점(SP명 조립, 비밀값 노출)에 실제로 존재하는 결함이므로 다음 라운드에서 수정 권장.
 - **Minor: 3건** (N1 JSON 템플릿 이스케이프 누락, N2 cron 문서화 공백, N3 run-now/last-result의 displayOutput 시점 불일치).
 - TASKS.md DoD 기준으로는 T1~T14 전부 LOG.md가 주장하는 대로 구현되어 있음을 코드 레벨에서 직접 확인했고, 테스트 스위트 실행(81/81)은 이번 리뷰에서 재실행하지 않았다(Docker/Testcontainers 필요, 정적 코드 리뷰로 범위를 좁힘 — 필요 시 별도로 `mvn test` 재실행 권장).
+
+---
+
+## 2차 리뷰 (다중 대상DB + cron 빌더, 커밋 `f8aa871^..194daac`)
+
+> 리뷰 대상: 설계 커밋 `f8aa871`부터 T21(`194daac`)까지 8개 커밋. `.team/PLAN.md`(§0 2026-11-16 교정 문단, §3.1/§3.1b/§3.3, §4.3b, §5, §6, §7, §9), `.team/TASKS.md`(T15~T21), `.team/LOG.md`(T15~T21 섹션, 2026-11-16/17)를 전부 읽고 `git diff f8aa871^..HEAD`(49개 파일, +2127/-247)로 실제 변경분을 전부 확인. 1차 리뷰의 M1(SP명 SQL 인젝션)·M2(짧은 비밀값 마스킹) 수정이 이번 라운드의 신규 코드(신규 Repository/Controller)에서 재발했는지도 별도로 확인했다.
+>
+> **결론 먼저: blocking 이슈 없음.** 1차 리뷰 때 지적한 M1/M2 패턴은 이번에 추가된 코드에서 재발하지 않았다(아래 "재발 여부 확인" 참고). 다만 이번 라운드 자체의 신규 결함으로 major 1건(`targetDbConfigIds` 배열의 중복 id 미검증 → 500), minor 2건(스케줄 생성/수정과 대상DB 연결 교체 간 원자성 없음, `executeForTargetDb`의 불필요한 중복 조회)을 발견했다.
+
+### Major
+
+#### M4. `targetDbConfigIds` 배열에 중복 id가 섞이면 400이 아니라 500 — 배열 검증이 "존재 여부"만 다루고 "중복"은 다루지 않음
+
+- **위치**: `backend/src/main/java/com/scheduler/web/api/ScheduleController.java:144-151`(`validateTargetDbConfigIds`), `backend/src/main/java/com/scheduler/infra/persistence/jdbc/JdbcScheduleTargetDbConfigRepository.java:38-60`(`replaceForSchedule`).
+- **문제**: PLAN.md §4.3b는 "PK는 `(schedule_id, target_db_config_id)` 복합키(같은 대상DB를 같은 스케줄에 중복 선택하는 것을 DB 레벨에서 방지)"라고 명시한다. 실제로 DB 레벨 방지는 맞고(`ScheduleTargetDbMultiMigrationTest`가 중복 insert의 PK 위반을 확인) — 하지만 그 "DB 레벨 방지"가 **API 레벨에서 깔끔한 400으로 변환되지 않는다**. `validateTargetDbConfigIds`는 `targetDbConfigRepository.findById(id).isEmpty()`로 "존재하지 않는 id"만 걸러내고, 중복 원소 자체는 걸러내지 않는다(`@NotEmpty`도 중복을 막지 못함). `replaceForSchedule`은 받은 리스트를 그대로 `batchUpdate`에 넘기므로, 같은 id가 두 번 들어오면 두 번째 INSERT가 복합 PK 위반으로 `DuplicateKeyException`(`DataIntegrityViolationException`의 서브타입)을 던진다. `ApiExceptionHandler`(`web/api/ApiExceptionHandler.java`)에는 이 예외에 대한 핸들러가 없어 Spring Boot 기본 에러 핸들러로 떨어져 **500**이 나간다.
+- **재현/확인 방법**:
+  1. 유효한 JWT로 `POST /api/schedules`에 `targetDbConfigIds: [5, 5]`(존재하는 같은 id 두 번)를 포함한 바디 전송.
+  2. `validateTargetDbConfigIds`는 두 원소 모두 `findById`가 존재를 반환하므로 통과.
+  3. `scheduleTargetDbConfigRepository.replaceForSchedule(savedId, [5, 5])`가 `(savedId, 5)`를 두 번 insert 시도 → 두 번째 삽입에서 PK 위반 → 핸들러 없는 예외 → 500.
+  4. 수정(`PUT /api/schedules/{id}`)도 동일 코드경로(`validateTargetDbConfigIds` + `replaceForSchedule`)를 타므로 같은 방식으로 재현된다.
+- **영향 평가**: React SPA의 `TargetDbConfigMultiSelect`(체크박스 토글 방식)는 구조적으로 중복을 만들 수 없으므로, 공식 프론트엔드 경로로는 이 버그에 도달하지 않는다 — 실제로는 API를 직접 호출하는 경로(수동 테스트, 향후 통합, Postman 등)에서만 트리거된다. 그럼에도 "배열 검증이 모든 경로에서 일관되는지"를 명시적으로 요청받은 항목이고, 테스트 스위트(`ScheduleControllerTest`)에도 빈 배열·존재하지 않는 id 케이스는 있지만 중복 id 케이스는 없어(grep으로 확인, `createWithEmptyTargetDbConfigIdsIsBadRequest`/`createWithNonExistentTargetDbConfigIdIsBadRequest`만 존재) 이 경계가 테스트로 커버되지 않은 채 남아있다. 500 자체가 응답 바디에 평문 비밀값이나 스택트레이스를 노출하지는 않지만(Spring Boot 기본값), API 계약 관점에서 "검증 가능한 입력 오류"가 "서버 오류"로 분류되는 것은 명백한 결함이다.
+- **권장 수정 방향(참고용)**: `validateTargetDbConfigIds`에서 `targetDbConfigIds`에 `Set`으로 변환했을 때 크기가 줄어들면(중복 존재) 400을 던지거나, 아예 `replaceForSchedule` 호출 전에 `List.copyOf(new LinkedHashSet<>(ids))`로 묵묵히 중복 제거하는 두 방법 중 하나를 택하면 된다(전자가 "조용히 다른 동작을 하지 않는다"는 원칙에 더 맞는다).
+
+### Minor
+
+#### N4. 스케줄 생성/수정과 대상DB 연결 교체(`replaceForSchedule`)가 하나의 트랜잭션으로 묶여 있지 않음
+
+- **위치**: `backend/src/main/java/com/scheduler/web/api/ScheduleController.java:83-89`(`create`), `:102-108`(`update`).
+- **문제**: `create`/`update` 모두 `scheduleRepository.save(...)`(또는 `update(...)`)와 `scheduleTargetDbConfigRepository.replaceForSchedule(...)`를 **별개의 두 호출**로 순서대로 실행한다. `replaceForSchedule` 자체는 `@Transactional`이 붙어 있어 그 내부(DELETE+batch INSERT)는 원자적이지만, "스케줄 행 저장"과 "대상DB 연결 교체" 사이를 묶는 상위 트랜잭션은 없다. 두 호출 사이에 `replaceForSchedule`이 실패하면(위 M4의 중복 id 케이스, 또는 검증 통과 후 다른 요청이 그 사이에 해당 `target_db_config`를 삭제하는 TOCTOU) `schedule_definition` 행은 이미 커밋된 채로 남고, 그 스케줄은 대상DB가 0개인 상태가 된다 — PLAN.md §4.3b가 "스케줄 생성/수정 시 최소 1개 이상의 대상DB가 선택되어야 한다(0개인 상태는 허용하지 않는다)"고 명시한 불변조건이 DB에 일시적으로 깨진 채 남을 수 있다.
+- **영향**: 발생 조건이 좁다(동시성 경합 또는 위 M4 같은 다른 버그와 겹쳐야 함)는 점에서 심각도는 낮다. 다만 `GenericScheduleJob`/`ScheduleExecutor`가 이 상태의 스케줄을 만나면 `targetDbResults`가 빈 리스트인 채로 `FAILURE`("선택된 대상DB가 없음")를 조용히 반복 기록하게 되어, 사용자가 관리자 화면에서 "분명히 대상DB를 선택했는데 계속 실패한다"는 혼란스러운 상태를 겪을 수 있다.
+
+#### N5. `ScheduleExecutor.executeForTargetDb`가 같은 `target_db_config`를 대상DB당 두 번 조회
+
+- **위치**: `backend/src/main/java/com/scheduler/engine/execution/ScheduleExecutor.java:131-158`.
+- **문제**: `targetDbConfigName`을 구하기 위해 `targetDbConfigRepository.findById(targetDbConfigId)`를 먼저 호출(실패 시 `"target-db-" + id`로 폴백)하고, 바로 이어서 `try` 블록 안에서 **같은 id로 다시** `targetDbConfigRepository.findById(targetDbConfigId)`를 호출해 `orElseThrow`한다. 기능적으로 틀린 것은 아니지만(이름 조회가 실패해도 실행 자체는 계속되고, 두 번째 조회가 진짜 존재 검증을 담당), 대상DB가 N개면 매 실행마다 불필요하게 2N번의 DB 조회가 발생한다. 또한 두 조회 사이의 아주 좁은 시간 창에서 해당 `target_db_config`가 삭제되면(동시에 다른 관리자가 그 대상DB를 지우려는, TargetDbConfigController의 참조-차단이 걸려 있어 실제로는 거의 불가능하지만) 첫 조회는 이름을 얻고 두 번째 조회는 `NoSuchElementException`을 던지는 미세한 비일관 상태가 가능하다.
+- **영향**: 순수 성능/미화 이슈에 가깝다 — 대상DB 수가 "소수"라는 §0 전제(단일 업체, 보통 1~2개)에서는 체감 영향이 거의 없다. 심각도를 minor로 유지.
+
+### N:M 전환 정합성 — 확인된 사항 (문제 없음)
+
+- **마이그레이션(V3) 정합성**: `schedule_target_db_config` PK가 `(schedule_id, target_db_config_id)` 복합키로 생성되어 있고(`ScheduleTargetDbMultiMigrationTest`가 중복 insert의 PK 위반을 실제로 확인), `schedule_id`는 `ON DELETE CASCADE`, `target_db_config_id`는 `ON DELETE` 절이 없어 기본 `NO ACTION`(참조 중인 `target_db_config` 삭제를 DB 레벨에서도 차단) — PLAN.md §4.3b가 요구한 정책과 SQL Server/H2 양쪽 마이그레이션 파일이 정확히 일치. `schedule_definition.target_db_config_id` 컬럼과 그 FK 제약도 V3에서 함께 제거되어 있고, 사전 데이터 백필이 없는 것도 "아직 운영 전"이라는 PLAN.md 문서화된 결정과 일치(운영 전이므로 blocking 아님).
+- **스케줄 삭제 CASCADE**: `ScheduleTargetDbConfigRepositoryTest`(T16)가 스케줄 삭제 시 `schedule_target_db_config` 행이 CASCADE로 같이 삭제됨을 확인.
+- **대상DB 삭제 차단**: `TargetDbConfigController.delete`가 `schedule_target_db_config` 참조 체크(`findScheduleIdsByTargetDbConfigId`)로 변경되어 있고(기존 단일 FK 참조 체크에서 올바르게 전환됨), DB 레벨 `NO ACTION` FK가 방어심층으로 같이 작동.
+- **순차 실행 + 부분실패 허용**: `ScheduleExecutor.doExecute`가 `for` 루프로 대상DB를 순차 순회하고, `executeForTargetDb`가 대상DB 1개당 하나의 try/catch로 감싸져 있어 한 대상DB의 `StoredProcedureInvoker`/`ActionHandler` 예외가 다음 대상DB 순회를 막지 않음을 코드로 직접 확인(`multiTargetDbOneFailureStillRunsTheOtherAndReportsPartialSuccess` 테스트가 mock 호출 횟수로 "두 대상DB 모두 실제로 invoke 호출됨"까지 검증).
+- **집계 규칙**: `aggregateStatus`가 PLAN.md §3.1b 규칙(전부 성공→SUCCESS, 전부 실패→FAILURE, 혼재→PARTIAL_SUCCESS, 빈 리스트→FAILURE)과 정확히 일치. `TargetDbExecutionResult.status()`는 SUCCESS/FAILURE만 쓰고 PARTIAL_SUCCESS는 상위 `ExecutionResult`에서만 등장 — PLAN.md §3.1b "PARTIAL 없음" 명시와 일치.
+- **대상DB 데이터 비혼합**: `DisplayOutput`에 `targetDbConfigId`/`targetDbConfigName`이 추가되고 `DisplayOutputStore`가 `(scheduleId, targetDbConfigId)` 복합키로 전환되어, 한 스케줄의 여러 대상DB 결과가 섞이지 않음을 `multiTargetDbDisplayOnlyKeepsSeparateDisplayOutputsPerTargetNeverMixed` 테스트와 프론트 `RunResultModal.test.tsx`(성공한 대상DB의 행 데이터가 실패한 대상DB 섹션에 나타나지 않음을 RTL로 확인) 양쪽에서 실증.
+- **`run-now`/`last-result`의 실패 시 과거 데이터 노출 방지(1차 리뷰 N3의 다중 대상DB 확장판)**: `ScheduleExecutionController.displayOutputsFor`가 `targetDbResults`에서 **이번 실행에 SUCCESS인 대상DB만** 필터링해 `displayOutputStore`를 조회하므로, 어떤 대상DB가 이번 실행에서 실패했다면 그 대상DB의 과거 성공 결과가 응답에 섞여 나오지 않는다 — 1차 리뷰 때 지적한 문제의 재발이 없고, 오히려 대상DB 단위로 더 세밀하게 해결되어 있음.
+- **`groupingMode`/`groupByField`가 대상DB 경계를 넘지 않음**: `ApiCallActionHandler.handle(schedule, spResultRows)`는 대상DB 1개분의 `spResultRows`만 받으며(해당 지식은 `ScheduleExecutor`에만 있음), `groupRows`는 그 범위 내에서만 그룹핑한다 — PLAN.md §5 "2026-11-16 교정" 문단이 요구하는 "대상DB를 섞지 않는다" 원칙이 `ActionHandler` 인터페이스를 바꾸지 않고도(PLAN.md §3.1b "ActionHandler와의 경계" 그대로) 지켜짐.
+
+### 1차 리뷰 M1/M2 재발 여부 확인
+
+- **M1(SP명 SQL 인젝션) 재발 없음**: `ScheduleController.create`/`update` 양쪽 모두 여전히 `SqlIdentifierValidator.validate(request.spName())`을 호출한다(이번 diff에서 그대로 유지됨, `:79`/`:98`). `StoredProcedureInvoker.invoke`도 변경되지 않아 1차 수정(`02fee04`)이 그대로 살아있다. 이번 라운드가 건드린 "SP 호출" 관련 변경은 "대상DB 1개당 1회 호출을 N개로 반복"뿐이고, SP명/파라미터 바인딩 로직 자체는 손대지 않았다.
+- **M2(짧은 비밀값 마스킹) 재발 없음**: `Masking.lastFour`는 이번 diff에 포함되지 않았고(`web/api/Masking.java`는 변경 파일 목록에 없음), `TargetDbConfigController`/`CredentialController`가 여전히 그 수정된 버전을 그대로 사용한다. 이번 라운드에서 신설된 `TargetDbConfigRef` DTO(`id`/`name`만 담음, 비밀값 필드 없음)도 마스킹 대상 필드를 노출하지 않는다.
+- **새로 추가된 코드 중 유사 패턴 점검**: `JdbcScheduleTargetDbConfigRepository`(신규 Repository)는 전부 `NamedParameterJdbcTemplate` + 고정 SQL 텍스트(테이블/컬럼명은 리터럴, 바인딩 값은 전부 `:scheduleId`/`:targetDbConfigId` 파라미터)만 쓰고, 사용자 입력을 SQL 문자열에 직접 결합하는 지점이 없다 — M1과 같은 패턴이 신규 코드에 재도입되지 않았다. `cronPatterns.ts`의 `buildCron`은 사용자 입력(숫자/요일 코드)을 문자열 템플릿에 꽂지만 SQL이 아니라 cron 문자열이고, 최종적으로 백엔드 `CronExpression.isValidExpression`이 재검증하므로(§9.1 설계 그대로) 이 경로로 들어간 임의 문자열이 그대로 실행되는 경로는 없다.
+
+### 2차 리뷰 종합
+
+- **Blocking: 없음.**
+- **Major: 1건**(M4 — `targetDbConfigIds` 중복 id가 400이 아닌 500을 유발. API를 직접 호출하는 경로에서만 트리거되고 공식 SPA 경로로는 도달 불가하지만, 명시적으로 요청받은 "모든 경로에서 일관된 배열 검증" 기준에는 못 미침).
+- **Minor: 2건**(N4 스케줄 저장과 대상DB 연결 교체 간 트랜잭션 경계 없음, N5 `executeForTargetDb`의 중복 조회).
+- 1차 리뷰의 M1/M2는 이번 라운드의 신규/변경 코드에서 재발하지 않았고, N:M 전환(마이그레이션/CASCADE/삭제차단/순차실행/부분실패/데이터 비혼합/집계규칙)과 cron 구조화 입력(생성/역변환/경계케이스)은 PLAN.md가 약속한 그대로 구현되어 있음을 코드와 테스트 양쪽에서 확인했다.
+- 이번 리뷰도 1차와 마찬가지로 정적 코드 리뷰(파일 열람 + diff 대조)로 수행했고, `mvn test`/`npm test`를 직접 재실행하지는 않았다(LOG.md가 주장하는 116/116, 25/25는 코드 레벨 대조로 교차검증은 했으나 직접 실행 재확인은 아님).

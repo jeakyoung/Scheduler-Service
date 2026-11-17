@@ -405,3 +405,9 @@
 - DoD 점검: 백엔드 `mvn test` 전체 **116개 테스트 그린**(T18 이후 115 + 신규 1). `mvn clean package` 재확인 성공. 프론트엔드 `npm test`(vitest) **25/25 그린**(T20에서 이미 확인한 상태 그대로 재확인 — `CronBuilder`(T19)의 `cronPatterns.test.ts` 20개 포함). T20의 수동 UI 검증 보고는 T20 LOG 항목에 이미 투명하게 기록됨(브라우저 자동화 도구 부재 → curl e2e + RTL 컴포넌트 테스트로 대체, PARTIAL_SUCCESS만 curl 레벨에서는 재현 환경(두 번째 실제 SQL Server) 부재로 못 했고 이번 T21의 신규 테스트가 바로 그 공백을 REST API 레벨에서 메움).
 - **TASKS.md T15~T21 전체 완료.** 설계상 PLAN.md와 다르게 구현해야 했던 불가피한 지점 없음 — 다만 T15→T16, T16→T17, T18→T19 경계마다 DB 컬럼/Java API 제거가 강제한 컴파일/런타임 연쇄 수정이 있었고, 그때마다 "이번 Txx가 왜 다음 Txx의 영역까지 손댔는지"를 각 LOG 항목에 명시적으로 기록해둠.
 - 다음 작업: 없음(T15~T21 요청 사항 전부 완료, 사용자 확인 대기). 전부 로컬 commit만 수행, push 없음.
+
+## 2026-11-17 — 2차 리뷰(다중 대상DB+cron빌더) 완료, Major 1건 수정 지시
+- sched-reviewer가 REVIEW.md에 "2차 리뷰" 섹션 추가 완료. **Blocking 없음.** 1차 리뷰의 M1(SP명 SQL인젝션)/M2(짧은 비밀값 마스킹)는 이번 신규 코드에서 재발하지 않음을 확인. N:M 전환(마이그레이션/CASCADE/삭제차단/순차실행/부분실패/데이터 비혼합/집계규칙)과 cron 빌더는 PLAN.md 그대로 구현됨을 코드+테스트로 확인.
+- **Major 1건(수정 필요) — M4**: `targetDbConfigIds`에 같은 id가 중복으로 들어오면(예: `[5,5]`) `validateTargetDbConfigIds`가 "존재 여부"만 검사하고 "중복"은 안 걸러내서, `replaceForSchedule`의 복합PK 위반 예외가 핸들러 없이 그대로 전파돼 **400이 아니라 500**이 남. 공식 React SPA 경로(체크박스 다중선택)로는 구조적으로 도달 불가하지만, API 직접 호출 시 재현되는 명백한 검증 공백.
+- **Minor 2건(선택 수정)**: N4(스케줄 저장과 `replaceForSchedule`이 하나의 트랜잭션으로 안 묶여 있어, 중간에 실패 시 "대상DB 0개" 불변조건 위반 상태가 일시적으로 남을 수 있음), N5(`ScheduleExecutor.executeForTargetDb`가 같은 `target_db_config`를 대상DB당 2번 조회하는 비효율).
+- 다음 단계: sched-worker에게 M4(필수) + N4/N5(가능하면 같이) 수정 지시.

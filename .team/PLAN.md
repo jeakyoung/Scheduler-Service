@@ -47,8 +47,8 @@ RESEARCH.md (c)의 추천을 그대로 채택한다. 조정 없음.
 | 메타DB (스케줄 정의/설정/Quartz 상태 저장) | SQL Server | Quartz JDBC JobStore 공식 지원, 팀의 기존 SQL Server 운영 경험 |
 | 대상 업무 DB(SP를 호출할 대상) | SQL Server로 고정 (멀티-DBMS 지원 없음) | 사용자 확인: 연결정보(URL/계정)는 업체마다 다르지만 대상 DB 자체는 모든 솔루션이 MSSQL로 구성됨 — 멀티-DBMS 지원은 불필요한 범용성(2026-11-13 교정). `target_db_config`에 `db_type` 같은 DBMS 선택 필드 없음(§4.3 참고) |
 | 빌드도구 | Maven | RESEARCH 근거 동일(온보딩 마찰 최소) |
-| 배포 형태 | Spring Boot 실행 가능 jar(내장 톰캣) | 컨테이너화·운영 단순성. WAR 패키징도 기술적으로 가능하지만 기본값은 jar |
-| 관리자 웹 UI | **React (SPA), 백엔드와 완전히 분리된 별도 프론트엔드 앱** | 백엔드는 REST API만 제공, 화면은 별도 React 앱이 그 API를 호출하는 구조로 분리(2026-11-13 3차 교정, 사용자 직접 지시). Spring Boot를 Thymeleaf 서버 렌더링에 쓰지 않는다 — 프론트/백엔드가 독립적으로 빌드·배포되므로 CORS 허용 오리진 설정이 백엔드에 필요(§6 참고) |
+| 배포 형태 | **WAR, 외부 Tomcat에 배치**(2026-11-17 교정 — §11 참고. 기존 "jar+내장톰캣 권장" 결정을 대체) | 실제 배포 가능한 인프라가 외부 Tomcat뿐이라는 제약이 확인됨에 따라 변경. 로컬 개발 워크플로(`mvn spring-boot:run`)는 그대로 유지(§11.1) |
+| 관리자 웹 UI | **React (SPA)** — 소스/빌드는 백엔드와 분리된 별도 프론트엔드 앱, **운영 배포는 백엔드 WAR 안에 정적 리소스로 통합**(2026-11-17 교정, §11.2) | 백엔드는 REST API만 제공하고 화면은 React가 담당하는 역할 분리(2026-11-13 3차 교정)는 유지. 다만 "완전히 분리된 배포"였던 전제는 Tomcat 단일 인프라 제약으로 §11에서 깨졌다 — 로컬 개발 시의 분리 실행(프론트 dev서버+백엔드 별도 기동)은 계속 지원하므로 CORS 설정 자체는 유지(§11.5) |
 | 인증 | Spring Security, DB 기반 관리자 계정 + 토큰/세션 기반 API 인증 | 레거시에는 이런 보호가 전혀 없었음(개선점). 단일 업체 전제이므로 복잡한 역할(role)/권한 체계는 불필요 — ADMIN 단일 역할로 시작. SPA가 별도 오리진에서 호출하므로 CORS와 함께 쿠키(SameSite)/토큰 방식 중 구현 단계에서 선택 |
 | DB 접근 | Spring JDBC (`JdbcTemplate` 또는 `NamedParameterJdbcTemplate`) | 레거시의 `Statement`/`ResultSet` 수동 매핑 스타일을 거의 1:1 포팅. ORM 불필요(SP 호출 패턴 유지) |
 | 마이그레이션 | Flyway | 메타DB 스키마(스케줄 정의/설정/관리자 계정) 버전 관리. Quartz `QRTZ_*` 테이블도 Flyway 마이그레이션으로 함께 적용 |
@@ -62,6 +62,8 @@ RESEARCH.md (c)의 추천을 그대로 채택한다. 조정 없음.
 ## 2. 프로젝트 구조 (디렉터리/패키지)
 
 **2026-11-13 3차 교정(사용자 직접 지시) 반영**: 백엔드(Spring Boot, REST API 전용)와 프론트엔드(React SPA)를 레포 루트에서 `backend/`/`frontend/` 두 디렉터리로 분리한다. 기존에 레포 루트가 곧 Maven 프로젝트였던 구조는 `backend/`로 옮기고, `frontend/`를 신설한다. 백엔드는 화면을 전혀 렌더링하지 않고(Thymeleaf 제거) API만 제공한다.
+
+> **2026-11-17 교정**: 소스 트리의 `backend/`/`frontend/` 분리 자체는 그대로 유지한다(로컬 개발은 지금처럼 각자 따로 실행). 다만 **운영 배포 산출물은 분리되지 않는다** — `backend/pom.xml`의 `mvn package`가 `frontend/`를 빌드해 그 결과물을 백엔드 WAR 안(`target/classes/static/`)에 포함시키고, Tomcat에는 그 WAR 1개만 올라간다. 자세한 내용은 §11.
 
 ```
 Scheduler-Service/                         (레포 루트, git 루트)
@@ -131,15 +133,17 @@ Scheduler-Service/                         (레포 루트, git 루트)
 │  │  ├─ application-local.yml              (로컬 개발용, gitignore)
 │  │  └─ db/migration/                      (Flyway: V1__schedule_core.sql, V2__quartz_tables.sql, ...)
 │  │
-│  └─ pom.xml
+│  └─ pom.xml                               (packaging=war, 2026-11-17 — §11.1/§11.2: frontend-maven-plugin + maven-resources-plugin으로 frontend/dist를 target/classes/static으로 복사)
 │
-└─ frontend/                                (React SPA, 백엔드와 별도 빌드/배포)
+└─ frontend/                                (React SPA, 소스/로컬개발은 백엔드와 분리. 운영 WAR에는 빌드 결과물만 통합 — §11.2)
    ├─ src/
    │  ├─ pages/                             (§7 화면 목록에 1:1 대응 — Login, ScheduleList, ScheduleForm, RunResult, LastResult, TargetDbConfig, Credential, ChangePassword)
    │  ├─ components/                        (공용 UI: 파라미터 편집기, 헤더/바디템플릿 에디터, **CronBuilder**(2026-11-16 신규 — §9의 6가지 구조화 입력 + "고급: 직접 cron 입력" 토글, cron↔구조화 양방향 변환 로직), **TargetDbConfigMultiSelect**(2026-11-16 신규) 등)
    │  ├─ api/                               (백엔드 REST 호출 클라이언트, baseURL = 환경변수로 주입)
    │  └─ App.tsx / 라우팅
    ├─ .env.example                          (API_BASE_URL 등 — 실제 값은 gitignore된 .env.local)
+   ├─ .env.local                            (로컬 개발용 절대 URL, 예: VITE_API_BASE_URL=http://localhost:8080 — gitignore)
+   ├─ .env.production                       (2026-11-17 신규 — §11.4: VITE_API_BASE_URL을 빈 값으로 둬서 운영 빌드가 상대경로로 API를 호출하게 함)
    └─ package.json
 ```
 
@@ -488,3 +492,79 @@ Quartz cron 필드 순서: `초 분 시 일(day-of-month) 월 요일(day-of-week
 - 다중 인스턴스 운영을 전제로 한 설계(분산 락 등 직접 구현) — Quartz JDBC JobStore가 부가적으로 제공하지만, 이를 적극적으로 활용/검증하는 것은 범위 밖(§0 전제: 단일 인스턴스)
 - 대상 업무 DB에 대한 **DDL 실행/신규 SP 생성 기능** — 엔진은 업체 DB에 **이미 존재하는 SP를 호출만** 하고, 생성/수정하지 않는다(사용자 확인: "의미 없을 것 같다, DDL 생성안은 보류" — 이번뿐 아니라 앞으로도 범위에 넣지 않기로 확정)
 - 대상 업무 DB에 대한 멀티-DBMS 지원 — MSSQL로 고정(§1, §4.3 참고)
+
+---
+
+## 11. 배포 방식 (Tomcat 단일 WAR, 2026-11-17 신규)
+
+**전제가 바뀌었다**: 지금까지 전제했던 "백엔드는 jar+내장톰캣 실행, 프론트는 별도 정적빌드+별도 서빙"(§1 "배포 형태"/"관리자 웹 UI" 원래 행, §2의 "백엔드/프론트엔드가 독립적으로 빌드·배포")은 **실제 배포 가능한 인프라가 외부 Tomcat뿐**이라는 제약 때문에 Tomcat 단일 WAR 배포로 바뀐다. "백엔드/프론트 완전분리 배포" 원칙(2026-11-13 3차 교정)은 **이번 운영 배포 방식에서만** 깨는 것으로 확정됐다 — 로컬 개발 시 분리 실행(프론트 dev서버 5173 + 백엔드 8080)은 그대로 유지한다.
+
+### 11.1 WAR 패키징 전환 + 로컬 개발 워크플로 보존
+
+- `backend/pom.xml`의 `<packaging>jar</packaging>` → `<packaging>war</packaging>`로 변경.
+- `SchedulerServiceApplication`이 `SpringBootServletInitializer`를 extends하고 `configure(SpringApplicationBuilder)`를 오버라이드해 `sources(SchedulerServiceApplication.class)`를 반환하도록 변경 — 외부 서블릿 컨테이너(Tomcat)가 WAR를 배치할 때 이 클래스를 통해 Spring 컨텍스트를 띄운다. `main()`은 그대로 남겨 jar 실행/로컬 개발 경로도 유지한다.
+- 내장 톰캣(`spring-boot-starter-tomcat`, 지금은 `spring-boot-starter-web`이 전이의존성으로 끌어옴)을 **`provided` 스코프로 명시적으로 선언**해 외부 Tomcat의 자체 서블릿 컨테이너와 클래스 충돌을 피한다. WAR에는 포함되지 않지만, 컴파일/테스트/로컬 실행 시점에는 여전히 classpath에 존재한다.
+- **로컬 개발 워크플로가 깨지지 않는 근거**: Maven의 `provided` 스코프는 "최종 패키지(war)에는 포함하지 않지만, 컴파일·테스트·그리고 `spring-boot-maven-plugin`의 `run` 목표가 구성하는 실행 classpath에는 포함한다"는 의미다. Spring Boot 공식 문서가 "배치 가능한 WAR 만들기" 패턴으로 바로 이 조합(WAR 패키징 + 내장 컨테이너 `provided` + `SpringBootServletInitializer`)을 권장하며, 이 조합에서도 `mvn spring-boot:run`이 내장 톰캣으로 정상 기동되는 것은 널리 쓰이는 표준 패턴이다(이 프로젝트가 처음 시도하는 구성이 아님). 다만 "문서상 근거"와 "이 프로젝트에서 실제로 동작 확인"은 다른 문제이므로, TASKS.md의 해당 작업(T23)에 **실제로 `mvn spring-boot:run`이 WAR 전환 후에도 로컬에서 기동되는지 회귀 테스트**를 DoD로 명시해 둔다 — 문서의 주장만으로 끝내지 않는다.
+
+### 11.2 프론트엔드 정적 리소스를 백엔드 WAR에 통합 — 단일 빌드 파이프라인
+
+**목표**: `mvn clean package` 한 번으로 "백엔드 컴파일 + 프론트 빌드(`npm run build`) + 그 결과물을 백엔드 WAR의 정적 리소스 경로로 복사"가 전부 끝난다. 개발자가 따로 `npm run build`를 수동으로 먼저 돌릴 필요가 없다.
+
+- **`frontend-maven-plugin`**(eirslett)을 `backend/pom.xml`에 추가해, Maven 빌드 생명주기 안에서 Node.js/npm을 설치하고(버전 고정) `npm install` → `npm run build`를 실행한다. `workingDirectory`를 `${project.basedir}/../frontend`로 지정해 백엔드 pom이 형제 디렉터리인 프론트엔드를 빌드하게 한다.
+- 프론트엔드 빌드 산출물은 그대로 `frontend/dist/`에 생성된다(소스 트리를 더럽히지 않음). **`maven-resources-plugin`**의 `copy-resources` 실행을 `generate-resources` 단계(Spring Boot의 기본 리소스 처리보다 먼저)에 바인딩해 `frontend/dist/**`를 `${project.build.outputDirectory}/static`(즉 `target/classes/static/`)로 복사한다 — `src/main/resources/static`이 아니라 **빌드 산출물 디렉터리(`target/`)로 복사**하는 쪽을 선택한다. 이유: `frontend/dist`가 매 빌드마다 바뀌는 산출물이라 `src/main/resources/static`에 커밋하면 소스 트리에 빌드 아티팩트가 섞이고 git diff가 오염된다 — `target/classes/static`은 이미 `.gitignore` 대상인 빌드 디렉터리라 깨끗하다.
+- Spring Boot의 기본 정적 리소스 서빙(`classpath:/static/`)이 이 `target/classes/static/`을 그대로 읽으므로, 별도 리소스 핸들러 등록 없이 `index.html`/JS/CSS가 서빙된다(SPA 폴백은 §11.3에서 별도로 다룸).
+- **DoD 수준의 확인 필요 사항**(TASKS.md에 명시): `mvn clean package`만 실행했을 때 Node/npm이 로컬에 전혀 설치되어 있지 않은 깨끗한 환경에서도 빌드가 끝까지 성공하는지(= `frontend-maven-plugin`이 Node를 로컬에 다운로드하는 것으로 충분한지) 확인.
+
+### 11.3 SPA 라우팅(React Router) ↔ 정적 리소스 서빙 충돌 해결
+
+브라우저가 `/schedules`처럼 React Router가 다루는 경로를 **직접 새로고침/딥링크**로 요청하면, 그 경로에 해당하는 정적 파일이 없으므로 서버가 404를 낸다. 이를 막기 위해 "정적 파일로 존재하지 않고 `/api/**`도 아닌 모든 GET 요청은 `index.html`로 포워드"하는 폴백이 필요하다.
+
+- **선택한 방식**: `WebMvcConfigurer.addResourceHandlers`에 `/**`를 매핑하되, `PathResourceResolver`를 오버라이드해 "요청한 경로의 리소스가 실제로 존재하면 그걸 서빙하고, 존재하지 않으면 `index.html`을 반환"하도록 구성한다(Spring Boot + SPA 통합에서 널리 쓰이는 표준 패턴).
+- **`/api/**`가 이 폴백에 걸리지 않는 이유**: Spring MVC의 `HandlerMapping` 우선순위상 `@RestController`의 `@RequestMapping("/api/...")`로 등록된 `RequestMappingHandlerMapping`이 정적 리소스용 `SimpleUrlHandlerMapping`보다 먼저 매칭을 시도한다 — 즉 `/api/**` 요청은 애초에 이 리소스 핸들러까지 도달하지 않는다(별도의 명시적 `exclude` 설정이 필요 없음). 다만 이건 "Spring의 기본 동작에 의존하는 암묵적 배제"이므로, TASKS.md에 **인증 없이 `/api/schedules`를 호출하면 401이 오고 `index.html`(200)이 오지 않는다는 회귀 테스트**를 DoD로 명시해 이 가정이 틀리지 않았는지 반드시 확인한다.
+- 대안으로 "경로에 점(`.`)이 없으면 forward"하는 정규식 기반 포워딩 컨트롤러 방식도 검토했으나, 정적 리소스 서빙과 폴백을 하나의 메커니즘(리소스 체인)으로 처리할 수 있는 `PathResourceResolver` 방식이 더 단순해 채택했다.
+
+### 11.4 컨텍스트 경로 결정 — `ROOT.war` 권장 + API 베이스 URL 상대경로화
+
+- Tomcat은 배치된 WAR 파일명을 컨텍스트 경로로 쓴다(`scheduler-service.war` → `/scheduler-service`, `ROOT.war` → `/`). **운영자에게 `ROOT.war`로 배치하는 것을 권장안으로 제시한다** — 컨텍스트 경로 프리픽스를 프론트/백엔드 양쪽 어디서도 신경 쓸 필요가 없어 가장 단순하다.
+- 그와 무관하게 더 안전한 설계는 **프론트엔드가 API를 항상 상대경로로 호출**하게 하는 것이다 — 같은 WAR에서 서빙되는 한 프론트/백엔드는 항상 같은 오리진·같은 컨텍스트 경로 아래에 있으므로, `fetch("/api/schedules")`처럼 **오리진을 포함하지 않는 경로만 쓰면 컨텍스트 경로가 무엇이든(`/` 든 `/scheduler-service` 든) 그대로 동작**한다(브라우저가 현재 페이지와 같은 오리진으로 자동 해석).
+- `frontend/src/api/client.ts`의 `API_BASE_URL`은 지금 `import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080"`로, 로컬 개발(백엔드 분리 실행) 시 절대 URL이 필요하다. **운영 빌드(`npm run build`)에서는 `VITE_API_BASE_URL`을 빈 문자열로 설정**해 `${API_BASE_URL}${path}`가 `${path}`(상대경로)가 되게 한다 — Vite의 `??`(nullish coalescing)는 빈 문자열을 "값 있음"으로 취급하므로 코드 변경 없이 `.env.production`에 `VITE_API_BASE_URL=`(빈 값)만 두면 된다. 로컬 개발용 `.env.local`(절대 URL, `http://localhost:8080`)은 그대로 유지 — Vite는 모드별로 `.env.local`(dev)과 `.env.production`(build)을 다르게 읽으므로 두 설정이 충돌하지 않는다.
+- `ROOT.war`가 아니라 컨텍스트 경로가 있는 이름으로 배치해야 하는 운영 사정이 생기면, 상대경로 방식이라 프론트/백엔드 양쪽 다 코드 변경이 필요 없다는 점이 이 설계의 핵심 이점이다.
+
+### 11.5 CORS 설정의 운명 — 유지, 통합배포에서는 사실상 미사용
+
+- `CorsConfig`(`app.cors.allowed-origin`)는 **제거하지 않고 그대로 둔다**. 통합배포(같은 오리진)에서는 브라우저가 CORS 프리플라이트 자체를 트리거하지 않으므로 이 설정이 관여하지 않지만(사실상 미사용), 로컬 개발 시 프론트 dev 서버(`localhost:5173`)와 백엔드(`localhost:8080`)를 분리 실행하는 기존 워크플로를 계속 지원하려면 CORS가 여전히 필요하다.
+- 운영 환경의 `CORS_ALLOWED_ORIGIN` 환경변수는 통합배포에서는 실질적으로 호출될 일이 없는 값이 되지만(같은 오리진이라 CORS 체크 자체가 안 일어남), 비워두거나 운영 도메인 자체를 넣어도 무해하다 — 관련 코드/설정을 조건부로 끄는 분기를 추가하지 않는다(불필요한 복잡도).
+
+### 11.6 환경변수 공급 방식 — 외부 Tomcat에서 `setenv.sh`/`setenv.bat` + 시스템 프로퍼티
+
+외부 Tomcat은 쉘 `export`로 기동되는 게 아니라 `catalina.sh`/`catalina.bat`(또는 서비스로 등록된 Tomcat)로 기동되므로, `$CATALINA_HOME/bin/setenv.sh`(Linux/Mac) 또는 `setenv.bat`(Windows) 파일에 `JAVA_OPTS`로 JVM 시스템 프로퍼티(`-D` 플래그)를 주입하는 방식을 쓴다. Tomcat은 기동 시 이 파일이 있으면 자동으로 source/호출한다(Tomcat 표준 확장 지점, `catalina.sh`가 존재 여부를 체크해 자동 로드).
+
+- **Spring이 `-D` 시스템 프로퍼티와 OS 환경변수를 모두 해석하므로 코드 변경이 필요 없는 이유**: `application.yml`의 `${DB_URL}` 같은 플레이스홀더는 Spring의 `PropertySourcesPlaceholderResolver`가 해석하는데, Spring Boot는 기본적으로 JVM 시스템 프로퍼티(`System.getProperties()`, `-D`로 주입)와 OS 환경변수(`System.getenv()`) 둘 다를 `PropertySource`로 등록해 둔다. `-DDB_URL=...`로 넘긴 시스템 프로퍼티는 정확히 키 이름 `DB_URL`로 노출되므로, OS 환경변수로 `DB_URL`을 주입하던 것과 `${DB_URL}` 플레이스홀더 해석 결과가 동일하다 — 즉 "OS env var 대신 JVM 시스템 프로퍼티로 주입"은 순수한 배포 환경 차이일 뿐, `application.yml`이나 자바 코드를 전혀 바꿀 필요가 없다.
+- **예시 (`setenv.sh`, Linux Tomcat)**:
+  ```sh
+  export JAVA_OPTS="$JAVA_OPTS \
+    -DDB_URL=jdbc:sqlserver://meta-db-host;databaseName=scheduler_meta \
+    -DDB_USERNAME=scheduler_app \
+    -DDB_PASSWORD=*** \
+    -DMASTER_ENCRYPTION_KEY=*** \
+    -DJWT_SIGNING_KEY=*** \
+    -DINITIAL_ADMIN_USERNAME=admin \
+    -DINITIAL_ADMIN_PASSWORD=*** \
+    -DCORS_ALLOWED_ORIGIN=http://localhost:5173"
+  ```
+- **예시 (`setenv.bat`, Windows Tomcat)**:
+  ```bat
+  set "JAVA_OPTS=%JAVA_OPTS% -DDB_URL=jdbc:sqlserver://meta-db-host;databaseName=scheduler_meta -DDB_USERNAME=scheduler_app -DDB_PASSWORD=*** -DMASTER_ENCRYPTION_KEY=*** -DJWT_SIGNING_KEY=*** -DINITIAL_ADMIN_USERNAME=admin -DINITIAL_ADMIN_PASSWORD=*** -DCORS_ALLOWED_ORIGIN=http://localhost:5173"
+  ```
+- 값에 특수문자(base64의 `+`/`=` 등)가 있으면 셸/배치 인용(quoting) 규칙에 주의해야 한다는 점을 README에 명시(TASKS.md 해당 작업).
+- `setenv.sh`/`setenv.bat`는 Tomcat 설치본(`$CATALINA_HOME/bin/`) 안에 두는 파일이라 **이 레포에는 커밋하지 않는다** — README에 "이 내용을 Tomcat의 `bin/setenv.sh`에 넣으라"는 안내와 예시만 제공한다.
+
+### 11.7 이번 배포방식 변경이 깨는 것 / 깨지 않는 것 요약
+
+| | 깨지는가 | 비고 |
+|---|---|---|
+| 백엔드/프론트 "완전분리 배포" 원칙(3차 교정) | **운영 배포에서만 깨짐** | 로컬 개발 분리 실행은 유지(§11.1/§11.5) |
+| `mvn spring-boot:run` 로컬 개발 워크플로 | 안 깨짐(의도) | §11.1, 단 TASKS.md에서 실측 회귀 테스트로 재확인 |
+| CORS 설정 | 안 깨짐(유지) | §11.5, 통합배포에서는 미사용일 뿐 |
+| 프론트 API 호출 방식 | **바뀜** | 절대 URL → 운영 빌드에서 상대경로(§11.4) |
+| `application.yml`/자바 코드의 환경변수 해석 로직 | 안 바뀜 | §11.6, `-D` 시스템 프로퍼티도 동일하게 해석됨 |

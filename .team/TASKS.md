@@ -2,9 +2,10 @@
 
 > `.team/PLAN.md` 기준. 순서대로 구현한다(각 작업은 원칙적으로 앞 작업의 결과물 위에 쌓임).
 > 레거시(`C:\Users\USER\Desktop\scheduler-test\scheduler-test`)는 참고만 하고 수정하지 않는다.
-> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T22)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
+> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T28)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
 > **2026-11-13 3차 교정(사용자 직접 지시) 반영**: 관리자 화면은 Thymeleaf가 아니라 별도 React SPA(`frontend/`)로 구현한다. 백엔드(`backend/`)는 REST API만 제공한다. 이에 따라 레포를 `backend/`/`frontend/` 두 디렉터리로 분리하는 작업(T1)과 프론트엔드 스캐폴딩+CORS 연동(T2)을 별도 작업으로 추가했다.
-> **2026-11-16 교정(사용자 직접 지시) 반영**: PLAN.md에 3가지 신규 기능 — (1) 알람식 반복주기 입력 UI(§9), (2) 스케줄당 대상DB 다중 선택(§4.3b), (3) 대상DB별 모아보기(§7) — 가 추가됨에 따라, T1~T14(기존 범위) 뒤에 T15~T21을 이어서 추가한다. 스키마 변경(T15) → 도메인/엔진(T16~T17) → API(T18) → 프론트(T19~T20) → 회귀테스트(T21) 순서. 기존 future task(실행이력 테이블)는 T22로 밀렸다.
+> **2026-11-16 교정(사용자 직접 지시) 반영**: PLAN.md에 3가지 신규 기능 — (1) 알람식 반복주기 입력 UI(§9), (2) 스케줄당 대상DB 다중 선택(§4.3b), (3) 대상DB별 모아보기(§7) — 가 추가됨에 따라, T1~T14(기존 범위) 뒤에 T15~T21을 이어서 추가한다. 스키마 변경(T15) → 도메인/엔진(T16~T17) → API(T18) → 프론트(T19~T20) → 회귀테스트(T21) 순서.
+> **2026-11-17 교정(사용자 직접 지시) 반영**: 실제 배포 가능한 인프라가 외부 Tomcat뿐이라는 제약에 따라 PLAN.md §11(배포 방식)이 신설됨 — "백엔드 jar+내장톰캣, 프론트 별도 배포"를 "Tomcat 단일 WAR" 배포로 전환. T21(기존 범위 마지막) 뒤에 T22~T27(WAR 전환/빌드 파이프라인 통합/SPA 폴백 라우팅/API 베이스 URL 상대경로화/로컬 개발 워크플로 회귀 확인/README 배포 가이드)을 이어서 추가한다. 기존 future task(실행이력 테이블)는 T28로 밀렸다.
 
 ---
 
@@ -246,10 +247,73 @@
 
 ---
 
+### T22. WAR 패키징 전환 (PLAN.md §11.1)
+
+- `backend/pom.xml`: `<packaging>jar</packaging>` → `<packaging>war</packaging>`.
+- `SchedulerServiceApplication`이 `SpringBootServletInitializer`를 extends하도록 변경하고 `configure(SpringApplicationBuilder builder)`를 오버라이드해 `builder.sources(SchedulerServiceApplication.class)`를 반환. 기존 `main()`/`SpringApplication.run(...)`은 그대로 유지(로컬 jar 실행/개발 경로).
+- `spring-boot-starter-tomcat`을 `provided` 스코프로 명시 선언(지금은 `spring-boot-starter-web`의 전이의존성으로 묵시적으로 들어와 있음 — 명시적 `<dependency>` 엔트리를 추가해 스코프를 오버라이드).
+
+**DoD**: `mvn clean package`가 `.war` 파일을 생성함(`target/*.war`). **회귀 확인**: `mvn spring-boot:run`이 WAR 패키징+`provided` 스코프 상태에서도 여전히 내장 톰캣으로 로컬 기동되는지 실제로 실행해 확인(PLAN.md §11.1이 "문서상 근거"로 남겨둔 가정의 실측 검증 — 통과하지 않으면 이 작업은 완료로 보지 않는다). 기존 단위/통합 테스트(T1~T21) 전부 그린 유지.
+
+---
+
+### T23. 빌드 파이프라인 통합 — Maven이 프론트엔드 빌드까지 수행 (PLAN.md §11.2)
+
+- `backend/pom.xml`에 `frontend-maven-plugin`(eirslett) 추가: Node.js/npm 버전을 고정해 설치하고, `workingDirectory`를 `${project.basedir}/../frontend`로 지정해 `npm install` → `npm run build`를 Maven 빌드 생명주기(예: `generate-resources` 단계)에 바인딩.
+- `maven-resources-plugin`의 `copy-resources` 실행을 추가해 `frontend/dist/**`를 `${project.build.outputDirectory}/static`(`target/classes/static/`)로 복사 — `src/main/resources/static`에는 커밋하지 않는다(빌드 산출물과 소스 트리 분리, PLAN.md §11.2 근거).
+- 두 플러그인 실행 순서가 "npm build 완료 → 그 다음 복사 → 그 다음 war 패키징"이 되도록 Maven 단계(phase) 바인딩을 맞춘다.
+
+**DoD**: Node/npm이 전혀 설치되어 있지 않은 깨끗한 환경(또는 그렇게 흉내 낸 환경)에서 `mvn clean package` 한 번만 실행했을 때 끝까지 성공하고, 생성된 WAR 안(`unzip -l target/*.war` 또는 `jar tf`)에 `WEB-INF/classes/static/index.html`과 프론트 빌드 산출물(JS/CSS)이 포함되어 있음을 확인.
+
+---
+
+### T24. SPA 폴백 라우팅 (PLAN.md §11.3)
+
+- `WebMvcConfigurer.addResourceHandlers`로 `/**`를 `classpath:/static/`에 매핑하고, `PathResourceResolver`를 오버라이드해 요청 리소스가 존재하지 않으면 `classpath:/static/index.html`을 반환하도록 구현.
+- `/api/**`는 별도 제외 설정을 추가하지 않는다(PLAN.md §11.3 — `RequestMappingHandlerMapping`이 `SimpleUrlHandlerMapping`보다 먼저 매칭되므로 자연히 배제됨) — 대신 아래 DoD의 회귀 테스트로 이 가정을 검증한다.
+
+**DoD**: 통합 테스트로 (1) 정적 파일로 존재하지 않는 경로(예: `GET /schedules`, 확장자 없음)를 요청하면 `index.html` 내용이 200으로 반환됨, (2) 실제 존재하는 정적 자산(예: 빌드된 JS 파일 경로)을 요청하면 그 파일이 그대로 반환됨(index.html로 대체되지 않음), (3) **인증 없이 `GET /api/schedules`를 호출하면 401이 오고 `index.html`(200)이 오지 않음**(§11.3이 명시한 암묵적 배제 가정의 실측 검증 — 이 테스트가 실패하면 명시적 exclude 설정을 추가해야 함)을 확인.
+
+---
+
+### T25. 프론트엔드 API 베이스 URL 상대경로화 (PLAN.md §11.4)
+
+- `frontend/.env.production` 신설: `VITE_API_BASE_URL=`(빈 값)으로 설정.
+- `frontend/src/api/client.ts`는 코드 변경 없이 그대로 두되(`?? "http://localhost:8080"`는 `null`/`undefined`일 때만 fallback하고 빈 문자열은 그대로 사용되므로 의도대로 동작 — PLAN.md §11.4 근거), 로컬 개발용 `.env.local`(`VITE_API_BASE_URL=http://localhost:8080`)은 그대로 유지해 두 모드가 충돌하지 않는지 확인.
+- `README`(T27에서 작성)에 "운영 빌드는 상대경로로 API를 호출하므로 Tomcat 컨텍스트 경로가 무엇이든 동작한다"는 설명을 남길 자리를 마련.
+
+**DoD**: `npm run build`(production 모드)로 생성된 산출물을 WAR에 포함시켜 Tomcat에 **컨텍스트 경로가 있는 이름으로**(예: `scheduler-service.war` → `/scheduler-service`) 배치했을 때, 프론트엔드가 하드코딩된 `localhost`가 아니라 상대경로로 API를 정상 호출함을 수동으로 1회 확인(§11.4가 주장하는 "컨텍스트 경로 무관 동작"의 실측 검증).
+
+---
+
+### T26. 로컬 개발 워크플로 회귀 없음 확인 (T22~T25 종합)
+
+- T22~T25의 변경(WAR 패키징, provided 스코프, 빌드 파이프라인, 리소스 폴백, API 베이스 URL)을 모두 적용한 뒤, 기존 로컬 개발 워크플로 두 가지가 전부 깨지지 않았는지 종합 확인:
+  1. **분리 실행**: 백엔드는 `mvn spring-boot:run`(8080), 프론트는 `npm run dev`(5173, `.env.local`의 절대 URL 사용) — CORS 포함 정상 동작.
+  2. **통합 WAR 로컬 검증**: `mvn clean package`로 만든 WAR를 로컬 Tomcat(또는 `mvn tomcat7:run-war`류 로컬 검증 수단)에 올려 브라우저로 로그인→스케줄 CRUD→지금실행 전체 플로우가 단일 오리진에서 동작하는지 확인.
+- 두 워크플로 중 하나라도 깨졌으면 이 작업은 완료로 보지 않고 원인이 된 선행 작업(T22~T25)으로 돌아가 수정한다.
+
+**DoD**: 위 두 가지 로컬 워크플로가 모두 수동 검증으로 통과(조작 로그 또는 스크린샷으로 보고). 기존 `mvn test` 전체 그린 유지.
+
+---
+
+### T27. README에 Tomcat 배포 가이드 작성 (PLAN.md §11)
+
+- 레포 루트 또는 `backend/README.md`에 "WAR 빌드 → Tomcat 배치 → 환경변수 설정 → 기동" 순서의 운영 배포 가이드를 작성:
+  1. `mvn clean package`로 WAR 빌드(프론트 빌드가 자동 포함됨 — T23).
+  2. 생성된 WAR를 `$CATALINA_HOME/webapps/`에 배치(권장: `ROOT.war`로 이름 변경해 컨텍스트 경로를 `/`로 — PLAN.md §11.4 근거도 같이 설명).
+  3. `$CATALINA_HOME/bin/setenv.sh`(Linux/Mac) 또는 `setenv.bat`(Windows)에 `JAVA_OPTS`로 `-DDB_URL=...` 등 환경변수를 시스템 프로퍼티로 주입하는 예시(PLAN.md §11.6의 스니펫 그대로 가져와 실제 값 예시와 주석 포함) — 이 파일은 Tomcat 설치본에 두는 것이라 레포에는 커밋하지 않는다는 점도 명시.
+  4. Tomcat 기동/재기동 방법과, 기동 후 확인 포인트(헬스체크 URL, 초기 관리자 계정 로그인 등).
+- 값에 특수문자(`+`/`=` 등 base64 값)가 들어갈 때의 셸/배치 인용 주의사항 한 줄 포함.
+
+**DoD**: README를 처음 보는 사람이 그대로 따라가면 WAR를 빌드해서 Tomcat에 배치하고 환경변수를 설정해 기동까지 할 수 있는 수준으로 작성됨(리뷰어가 가이드만 보고 실제로 재현 가능한지 확인).
+
+---
+
 ## Future (이번 범위 제외, 별도 라운드)
 
-### T22 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
+### T28 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
 
 - PLAN.md §3.1/§3.2, §10(TBD 명시)에 따라 실행이력 테이블 스키마를 별도로 설계(감시 서버 원칙: 상태/요약만, SP 전체 결과행 보존 금지. 실패 기록 포함 — 대상DB별 세부결과(`TargetDbExecutionResult`, T17)도 영속화 대상에 포함할지 이 라운드에서 결정).
 - `ExecutionResultSink`의 새 구현(`JdbcExecutionResultSink` 등)을 추가하고 `LoggingExecutionResultSink`와 조합(`CompositeExecutionResultSink`) 또는 교체.
-- **착수 조건**: 이번 TASKS.md 범위(T1~T21) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.
+- **착수 조건**: 이번 TASKS.md 범위(T1~T27) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.

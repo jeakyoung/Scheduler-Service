@@ -133,6 +133,11 @@ export interface TargetDbConfigInput {
   password: string;
 }
 
+export interface ConnectionTestResult {
+  success: boolean;
+  message: string;
+}
+
 export interface Credential {
   id: number;
   name: string;

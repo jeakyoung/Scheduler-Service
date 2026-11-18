@@ -112,6 +112,39 @@ button.btn-sm {
   font-size: 13px;
 }
 
+/*
+ * Bug report (screenshot): row-action <Link>s (e.g. ScheduleListPage's "수정"/"최근 결과")
+ * sitting next to real <button>s in the same .actions cell rendered as plain underlined
+ * anchors instead of matching buttons. Duplicates the plain `button` rule above on purpose -
+ * the `button { ... }` selector only matches the <button> tag, so an <a> needs its own class
+ * to get the same look.
+ */
+.link-button {
+  display: inline-block;
+  font: inherit;
+  padding: 6px var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--text);
+  text-decoration: none;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.link-button:hover {
+  background: var(--code-bg);
+}
+
+/* Standalone "← back" navigational links (e.g. LastResultPage) - same bug as .link-button
+   above, different context (not sitting next to buttons, so no border/background needed). */
+.back-link {
+  display: inline-block;
+  margin-bottom: var(--space-3);
+  text-decoration: none;
+}
+.back-link:hover {
+  text-decoration: underline;
+}
+
 button:focus-visible,
 input:focus-visible,
 select:focus-visible,
@@ -199,6 +232,22 @@ tbody tr:hover {
 
 .table-scroll {
   overflow-x: auto;
+}
+
+/*
+ * Bug report (screenshot): a long single-line value in one cell (e.g. a JDBC URL like
+ * jdbc:sqlserver://host;databaseName=...;encrypt=false;trustServerCertificate=true;) wraps
+ * across multiple lines by default, which - under table-layout:auto - inflates that column's
+ * row height and starves the narrow button column next to it, wrapping button labels onto a
+ * second line ("pushed down"). Capping the cell at a fixed width and clipping with an ellipsis
+ * removes it from that width competition entirely; pair with a title="" attribute in markup so
+ * the full value is still available on hover.
+ */
+.cell-truncate {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .muted {
@@ -315,11 +364,19 @@ tbody tr:hover {
   align-items: center;
 }
 
+/*
+ * white-space: nowrap is defensive here, not the main fix - these are flex containers, so
+ * flex-wrap (kept as "wrap" on purpose, for narrow/mobile viewports per the 11-17 responsive
+ * polish) is what actually governs whether buttons drop to a second line, not white-space.
+ * The real fix for the reported "buttons pushed down" bug is .cell-truncate on the long-text
+ * sibling cell (e.g. jdbcUrl) that was starving this column of width in the first place.
+ */
 .actions {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+  white-space: nowrap;
 }
 
 .connection-status {
@@ -327,6 +384,7 @@ tbody tr:hover {
   flex-wrap: wrap;
   gap: var(--space-2);
   align-items: center;
+  white-space: nowrap;
 }
 
 .form-actions {
@@ -364,9 +422,28 @@ fieldset {
   padding: var(--space-3) var(--space-5);
   border-bottom: 1px solid var(--border);
 }
+/*
+ * Bug report (screenshot): nav links rendered as unstyled default browser anchors (blue,
+ * underlined) because only the .active tab had a rule - every other tab fell through to the
+ * browser default. Base state styled here (reusing existing tokens, no new palette); .active
+ * below layers the "current tab" emphasis on top via the same background/color treatment used
+ * elsewhere in the 11-17 design polish (e.g. button:hover's var(--code-bg)).
+ */
+.app-nav a {
+  text-decoration: none;
+  color: var(--muted);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-sm);
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+.app-nav a:hover {
+  color: var(--text-h);
+  background: var(--code-bg);
+}
 .app-nav a.active {
   color: var(--text-h);
   font-weight: 600;
+  background: var(--code-bg);
 }
 .app-nav-spacer {
   flex: 1;

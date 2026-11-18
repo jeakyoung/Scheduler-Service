@@ -187,7 +187,7 @@ export default function TargetDbConfigPage() {
                 return (
                   <tr key={c.id}>
                     <td>{c.name}</td>
-                    <td>{c.jdbcUrl}</td>
+                    <td className="cell-truncate" title={c.jdbcUrl}>{c.jdbcUrl}</td>
                     <td>{c.username}</td>
                     <td>
                       <code>{c.maskedPassword}</code>

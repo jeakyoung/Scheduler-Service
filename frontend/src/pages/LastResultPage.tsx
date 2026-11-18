@@ -23,7 +23,7 @@ export default function LastResultPage() {
   return (
     <div>
       <p>
-        <Link to="/schedules">← 스케줄 목록으로</Link>
+        <Link to="/schedules" className="back-link">← 스케줄 목록으로</Link>
       </p>
       <h1>최근 실행 결과</h1>
       <p className="muted">

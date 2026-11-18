@@ -136,7 +136,7 @@ export default function CredentialPage() {
                   <td>
                     <code>{c.maskedValue}</code>
                   </td>
-                  <td>{c.description}</td>
+                  <td className="cell-truncate" title={c.description ?? undefined}>{c.description}</td>
                   <td className="actions">
                     <button type="button" onClick={() => startEdit(c)}>
                       수정

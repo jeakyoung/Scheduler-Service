@@ -121,11 +121,11 @@ export default function ScheduleListPage() {
                 const lastResult = lastResults[schedule.id];
                 return (
                   <tr key={schedule.id}>
-                    <td>{schedule.name}</td>
+                    <td className="cell-truncate" title={schedule.name}>{schedule.name}</td>
                     <td>
                       <input type="checkbox" checked={schedule.enabled} onChange={() => handleToggleEnabled(schedule)} />
                     </td>
-                    <td>
+                    <td className="cell-truncate" title={schedule.cronExpression}>
                       <code>{schedule.cronExpression}</code>
                     </td>
                     <td>
@@ -149,8 +149,8 @@ export default function ScheduleListPage() {
                       <button type="button" onClick={() => handleRunNow(schedule)} disabled={runningId === schedule.id}>
                         {runningId === schedule.id ? "실행 중..." : "지금 실행"}
                       </button>
-                      <Link to={`/schedules/${schedule.id}/edit`}>수정</Link>
-                      <Link to={`/schedules/${schedule.id}/last-result`}>최근 결과</Link>
+                      <Link to={`/schedules/${schedule.id}/edit`} className="link-button">수정</Link>
+                      <Link to={`/schedules/${schedule.id}/last-result`} className="link-button">최근 결과</Link>
                       <button type="button" className="btn-danger" onClick={() => handleDelete(schedule)}>
                         삭제
                       </button>

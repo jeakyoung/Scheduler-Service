@@ -162,3 +162,45 @@ describe("TargetDbConfigPage connection test state transitions (T30)", () => {
     expect(screen.queryByText(/테스트 중/)).not.toBeInTheDocument();
   });
 });
+
+/**
+ * Bug report (screenshot): a long jdbcUrl wrapped across multiple lines and pushed the
+ * 수정/삭제/테스트 buttons in the same row onto a second line. Fixed with index.css's
+ * .cell-truncate (max-width + overflow:hidden + text-overflow:ellipsis + white-space:nowrap)
+ * plus a title="" attribute for the full value on hover. There's no browser automation in this
+ * environment (same constraint as T12/T20/T26 etc.) to visually confirm no wrapping occurs, so
+ * this checks what jsdom/RTL actually can: the class is applied, the title attribute carries
+ * the full untruncated value (CSS ellipsis is a rendering effect only - it doesn't touch the
+ * DOM text), and the row's buttons remain present and queryable (i.e. nothing about the long
+ * value broke the row's structure).
+ */
+describe("TargetDbConfigPage long jdbcUrl layout fix", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("truncates a long jdbcUrl with a title tooltip instead of letting it wrap", async () => {
+    const longJdbcUrl =
+      "jdbc:sqlserver://very-long-erp-hostname.internal.example.com;databaseName=erp_production;encrypt=true;trustServerCertificate=false;loginTimeout=30;";
+    expect(longJdbcUrl.length).toBeGreaterThan(80);
+
+    vi.mocked(targetDbConfigApi.list).mockResolvedValue([
+      { id: 1, name: "Long URL target", jdbcUrl: longJdbcUrl, username: "u1", maskedPassword: "****", createdAt: null, updatedAt: null },
+    ]);
+
+    render(<TargetDbConfigPage />);
+    await waitFor(() => expect(screen.getByText("Long URL target")).toBeInTheDocument());
+
+    const row = screen.getByText("Long URL target").closest("tr")!;
+    const urlCell = within(row).getByTitle(longJdbcUrl);
+    expect(urlCell.tagName).toBe("TD");
+    expect(urlCell).toHaveClass("cell-truncate");
+    expect(urlCell).toHaveTextContent(longJdbcUrl);
+
+    // The row's own buttons must still be present and in the same row, not disturbed by the
+    // long value in the sibling cell.
+    expect(within(row).getByRole("button", { name: "수정" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "삭제" })).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: "테스트" })).toBeInTheDocument();
+  });
+});

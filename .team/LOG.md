@@ -571,3 +571,22 @@
 - 테스트: (1) `createWithPastOneTimeCronIsBadRequestNotServerError` — 과거 연도(2000) 1회성 cron으로 생성 시도 시 400 + 안내 메시지 확인(500 아님을 명시적으로 확인), (2) `createWithFutureOneTimeCronSucceeds` — 미래 연도(2099) 1회성 cron은 정상 생성(회귀 없음), (3) `createWithRecurringCronPatternsStillSucceeds` — 일별/월별/요일반복/간격반복 4가지 기존 반복형 패턴이 이번 사전검증에 전혀 영향받지 않고 전부 생성됨을 확인, (4) `reEnablingAStoredScheduleWithAnUnfireableCronIsBadRequestNotServerError` — 안전망(수정 1)을 `PATCH .../enabled` 경로로 직접 실측 + 위에서 발견한 2차 버그의 재현/수정 확인(실패 후 DB의 `enabled`가 롤백되어 `false`로 남아있는지 단언).
 - `mvn test` 143/143 그린(기존 139 + 신규 4). 전체 스위트 재실행으로 2차 버그 수정이 다른 테스트 클래스의 컨텍스트 로딩을 더 이상 깨뜨리지 않음을 확인.
 - DoD 점검: 과거 1회성 cron 생성 시도가 500이 아니라 400으로 명확히 거부됨을 실측 확인, 미래 1회성 cron과 기존 4가지 반복 패턴 전부 회귀 없음, 안전망 예외매핑이 실제로 동작함을 확인하는 과정에서 발견한 트랜잭션 누락(앱 전체 기동 실패로 이어질 수 있었던 2차 버그)까지 수정 완료, 전체 테스트 스위트 그린.
+
+## 2026-11-18 — 프론트엔드 디자인 버그 2건 수정 (사용자 스크린샷 제보, worker)
+- 사용자가 스크린샷으로 제보한 순수 CSS/마크업 버그 2건 수정(로직/API 변경 없음, 11-17 디자인 폴리싱과 같은 성격).
+
+### 버그 1: 네비게이션/링크가 브라우저 기본 스타일(파란 밑줄)로 보임
+- 원인: `frontend/src/index.css`의 `.app-nav a.active`(활성 탭)만 스타일이 있고, 기본(비활성) `.app-nav a` 자체에는 아무 규칙이 없어서 나머지 네비게이션 항목이 전부 브라우저 기본 링크로 보임 — 사용자가 이미 정확히 짚어낸 원인.
+- `.app-nav a` 기본 상태 추가: `text-decoration:none`, `color: var(--muted)`, `padding`/`border-radius`는 기존 버튼과 같은 토큰(`--space-3`/`--radius-sm`), hover 시 `color: var(--text-h)` + `background: var(--code-bg)`(버튼 hover와 동일 톤). `.active`에도 같은 `background: var(--code-bg)`를 추가해 "지금 보고 있는 탭"이 hover와는 다르게 영구히 강조되도록 함(font-weight 600 유지). 새 색상 팔레트 없음 — 기존 `--muted`/`--text-h`/`--code-bg`/`--radius-sm`/`--space-3` 재사용.
+- 같은 문제를 `grep "<Link to="` 로 전체 확인: `LastResultPage.tsx`의 "← 스케줄 목록으로"(단독 네비게이션 링크), `ScheduleListPage.tsx`의 행별 "수정"/"최근 결과"(`.actions` 셀 안에서 실제 `<button>`들과 나란히 있어 특히 두드러짐) — 3곳 모두 같은 패턴으로 발견.
+  - `.back-link` 유틸 클래스 신설(단독 네비게이션 링크용 — `text-decoration:none`, hover 시 밑줄만): `LastResultPage.tsx`에 적용.
+  - `.link-button` 유틸 클래스 신설(버튼들 사이에 끼는 액션 링크용 — 기존 `button { ... }` 규칙을 그대로 복제, `<a>`는 태그 선택자로 못 잡으므로 별도 클래스 필요): `ScheduleListPage.tsx`의 "수정"/"최근 결과"에 적용. "+ 새 스케줄" `<Link>`는 이미 내부 `<button class="btn-primary">`가 전체를 덮어 시각적으로 문제없어 그대로 둠.
+  - `grep`으로 `<a `/`<a>` 직접 사용 여부도 확인 — 전부 `<Link>`/`<NavLink>` 경유라 추가로 발견된 곳 없음.
+
+### 버그 2: 대상DB설정 목록에서 긴 JDBC URL이 버튼을 밀어냄
+- 원인: `table-layout: auto`에서 줄바꿈 가능한 긴 텍스트(JDBC URL은 `;`마다 줄바꿈 기회가 있음)가 있으면 브라우저가 그 컬럼에 폭을 과할당하면서 옆의 좁은 버튼 컬럼(`.actions`/`.connection-status`)을 쥐어짜 버튼 레이블 자체가 2줄로 꺾이는 현상(= "버튼이 아래로 밀림").
+- `.cell-truncate` 유틸 클래스 신설(`max-width: 280px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;`) — 긴 텍스트 컬럼을 폭 경쟁에서 완전히 빼버림. `.actions`/`.connection-status`에는 방어적으로 `white-space: nowrap`도 추가(다만 실제 줄바꿈을 막는 건 `flex-wrap`이라 이건 보조적 조치임을 주석으로 명시 — 모바일 반응형을 위해 `flex-wrap: wrap`은 그대로 유지).
+- 적용 범위(그레핑/페이지별 확인): `TargetDbConfigPage.tsx`의 `jdbcUrl` 셀(원 제보 케이스, `title` 속성으로 전체 URL 툴팁 추가), `ScheduleListPage.tsx`의 `name`/`cronExpression` 셀(길어질 수 있는 사용자 입력 텍스트, 둘 다 `title` 추가), `CredentialPage.tsx`의 `description` 셀(자유 텍스트, `title` 추가, null일 수 있어 `?? undefined`로 처리). `대상 DB` 배지 칩 컬럼은 이미 자연스럽게 줄바꿈되는 flex 배지라 제외.
+- **검증(이 환경에 브라우저 자동화가 없다는 기존 제약 동일, 투명하게 기록)**: (1) `TargetDbConfigPage.test.tsx`에 80자 이상 실제 JDBC URL(`jdbc:sqlserver://very-long-erp-hostname...`, 149자)로 렌더링하는 테스트 추가 — `.cell-truncate` 클래스 적용, `title` 속성에 전체 URL이 그대로 들어있음(CSS ellipsis는 렌더링 효과일 뿐 DOM 텍스트는 안 잘림), 같은 행의 수정/삭제/테스트 버튼이 전부 정상적으로 존재/쿼리 가능함을 RTL로 확인. (2) `npm run dev` 실제 기동 후 Vite가 변환한 `index.css`를 curl로 받아 `.app-nav a`/`.link-button`/`.back-link`/`.cell-truncate`/`.actions`/`.connection-status`가 의도한 속성 그대로 컴파일됐는지 확인, 그리고 5개 컴포넌트(`TargetDbConfigPage`/`ScheduleListPage`/`CredentialPage`/`LastResultPage`/`Layout`)의 변환된 `className` 전부가 CSS에 정의된 클래스와 정확히 일치함(오타 없음)을 대조 확인.
+- `npm test` 32/32 그린(기존 31 + 신규 1), `npm run build`/`tsc -b` 성공, `npm run lint` 신규 경고 없음(기존 3건 그대로).
+- DoD 점검: 두 버그 모두 수정 완료, 같은 패턴의 다른 페이지(ScheduleListPage/CredentialPage/LastResultPage)까지 그레핑으로 확인해 일관되게 적용, 긴 URL 렌더링 테스트 + 컴파일된 CSS/className 대조로 실측 검증, 전체 테스트/빌드/린트 회귀 없음. **로컬 커밋만 수행 — push는 오케스트레이터가 전체 작업 완료 후 한 번에 처리할 예정이라 보류.**

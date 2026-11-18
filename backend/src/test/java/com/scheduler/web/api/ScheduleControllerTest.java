@@ -84,6 +84,11 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(notNullValue()))
                 .andExpect(jsonPath("$.nextFireTime").value(notNullValue()))
+                // Regression guard (AUTH_DISABLED bug fix) - with normal auth on (this class's
+                // @WithMockUser), updatedBy must still be the real authenticated username, not
+                // the AUTH_DISABLED placeholder that AuditActor falls back to when
+                // Authentication is null.
+                .andExpect(jsonPath("$.updatedBy").value("test-admin"))
                 .andReturn().getResponse().getContentAsString();
 
         long id = objectMapper.readTree(response).get("id").asLong();
@@ -289,7 +294,9 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
         mockMvc.perform(put("/api/schedules/" + id)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(apiCallRequestBody(true, "0 30 8 ? * TUE")))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                // Regression guard (AUTH_DISABLED bug fix) - real username, not the placeholder.
+                .andExpect(jsonPath("$.updatedBy").value("test-admin"));
 
         var updatedTrigger = scheduler.getTrigger(org.quartz.TriggerKey.triggerKey("schedule-" + id + "-trigger"));
         assertThat(updatedTrigger.getNextFireTime()).isNotEqualTo(firstNextFire);
@@ -303,7 +310,9 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
         mockMvc.perform(patch("/api/schedules/" + id + "/enabled")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"enabled\": false}"))
-                .andExpect(status().isOk());
+                .andExpect(status().isOk())
+                // Regression guard (AUTH_DISABLED bug fix) - real username, not the placeholder.
+                .andExpect(jsonPath("$.updatedBy").value("test-admin"));
         assertThat(scheduler.checkExists(JobKey.jobKey("schedule-" + id))).isFalse();
 
         mockMvc.perform(patch("/api/schedules/" + id + "/enabled")

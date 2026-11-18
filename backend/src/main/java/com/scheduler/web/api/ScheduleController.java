@@ -91,7 +91,7 @@ public class ScheduleController {
         ScheduleDefinition saved = scheduleRepository.save(new ScheduleDefinition(
                 null, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
                 request.spName(), request.actionType(), actionConfigJson,
-                request.description(), null, null, authentication.getName()
+                request.description(), null, null, AuditActor.nameOrPlaceholder(authentication)
         ));
         scheduleTargetDbConfigRepository.replaceForSchedule(saved.id(), request.targetDbConfigIds());
         scheduleRegistrar.register(saved);
@@ -111,7 +111,7 @@ public class ScheduleController {
         ScheduleDefinition updated = scheduleRepository.update(new ScheduleDefinition(
                 id, request.name(), request.enabled(), request.cronExpression(), request.timezone(),
                 request.spName(), request.actionType(), actionConfigJson,
-                request.description(), null, null, authentication.getName()
+                request.description(), null, null, AuditActor.nameOrPlaceholder(authentication)
         ));
         scheduleTargetDbConfigRepository.replaceForSchedule(id, request.targetDbConfigIds());
         scheduleRegistrar.register(updated);
@@ -129,7 +129,7 @@ public class ScheduleController {
     @PatchMapping("/api/schedules/{id}/enabled")
     public ScheduleResponse setEnabled(@PathVariable long id, @Valid @RequestBody EnabledRequest request, Authentication authentication) {
         requireSchedule(id);
-        scheduleRepository.updateEnabled(id, request.enabled(), authentication.getName());
+        scheduleRepository.updateEnabled(id, request.enabled(), AuditActor.nameOrPlaceholder(authentication));
         ScheduleDefinition updated = requireSchedule(id);
         scheduleRegistrar.register(updated);
         return toResponse(updated, scheduleParameterRepository.findByScheduleId(id));

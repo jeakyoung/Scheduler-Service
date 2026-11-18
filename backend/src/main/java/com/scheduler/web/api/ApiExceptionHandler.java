@@ -5,6 +5,7 @@ import com.scheduler.engine.execution.ScheduleNotFoundException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authentication.InsufficientAuthenticationException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -45,6 +46,15 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(BadCredentialsException.class)
     public ResponseEntity<Map<String, String>> handleBadCredentials(BadCredentialsException e) {
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
+    }
+
+    /**
+     * Thrown by AuthController when AUTH_DISABLED left Authentication null for an endpoint
+     * (/api/auth/me, /api/auth/password) whose whole purpose depends on a real identity.
+     */
+    @ExceptionHandler(InsufficientAuthenticationException.class)
+    public ResponseEntity<Map<String, String>> handleInsufficientAuthentication(InsufficientAuthenticationException e) {
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", e.getMessage()));
     }
 

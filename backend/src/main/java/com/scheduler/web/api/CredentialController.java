@@ -43,7 +43,7 @@ public class CredentialController {
     @ResponseStatus(HttpStatus.CREATED)
     public CredentialResponse create(@Valid @RequestBody CredentialRequest request, Authentication authentication) {
         Credential saved = credentialRepository.save(new Credential(
-                null, request.name(), request.value(), request.description(), null, authentication.getName()
+                null, request.name(), request.value(), request.description(), null, AuditActor.nameOrPlaceholder(authentication)
         ));
         return toResponse(saved);
     }
@@ -52,7 +52,7 @@ public class CredentialController {
     public CredentialResponse update(@PathVariable long id, @Valid @RequestBody CredentialRequest request, Authentication authentication) {
         requireExists(id);
         Credential updated = credentialRepository.update(new Credential(
-                id, request.name(), request.value(), request.description(), null, authentication.getName()
+                id, request.name(), request.value(), request.description(), null, AuditActor.nameOrPlaceholder(authentication)
         ));
         return toResponse(updated);
     }

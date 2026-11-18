@@ -22,6 +22,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -64,9 +65,27 @@ class CredentialControllerTest extends AbstractRepositoryIntegrationTest {
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.maskedValue").value(org.hamcrest.Matchers.endsWith("-key")))
                 .andExpect(jsonPath("$.maskedValue").value(org.hamcrest.Matchers.startsWith("*")))
+                // Regression guard (AUTH_DISABLED bug fix) - with normal auth on (this class's
+                // @WithMockUser), updatedBy must still be the real authenticated username, not
+                // the AUTH_DISABLED placeholder that AuditActor falls back to when
+                // Authentication is null.
+                .andExpect(jsonPath("$.updatedBy").value("test-admin"))
                 .andReturn().getResponse().getContentAsString();
 
         assertThat(response).doesNotContain("super-secret-api-key");
+    }
+
+    @Test
+    void updateReturnsRealUsernameAsUpdatedBy() throws Exception {
+        Credential saved = credentialRepository.save(new Credential(null, "UPDATE_TARGET_KEY", "old-value", null, null, null));
+
+        mockMvc.perform(put("/api/config/credentials/" + saved.id())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"name":"UPDATE_TARGET_KEY","value":"new-value","description":"updated"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.updatedBy").value("test-admin"));
     }
 
     @Test

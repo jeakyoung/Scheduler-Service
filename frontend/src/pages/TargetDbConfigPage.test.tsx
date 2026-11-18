@@ -103,3 +103,62 @@ describe("TargetDbConfigPage connection test (T29)", () => {
     expect(targetDbConfigApi.create).not.toHaveBeenCalled();
   });
 });
+
+/**
+ * TASKS.T30 DoD explicitly asks for the 미확인→테스트중→성공/실패 *transition* to be
+ * rendered correctly, not just the before/after states (already covered above by T29's
+ * tests) - these use a manually-resolved promise so the pending "테스트 중..." state can be
+ * observed before it flips to its final value.
+ */
+describe("TargetDbConfigPage connection test state transitions (T30)", () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("row button transitions 미확인 → 테스트 중 → 연결 성공", async () => {
+    vi.mocked(targetDbConfigApi.list).mockResolvedValue(configs);
+    let resolveTest!: (value: { success: boolean; message: string }) => void;
+    vi.mocked(targetDbConfigApi.testConnectionById).mockImplementation(
+      () => new Promise((resolve) => (resolveTest = resolve)),
+    );
+
+    render(<TargetDbConfigPage />);
+    await waitFor(() => expect(screen.getByText("A사 DB")).toBeInTheDocument());
+    const rowA = screen.getByText("A사 DB").closest("tr")!;
+    expect(within(rowA).getByText("미확인")).toBeInTheDocument();
+
+    fireEvent.click(within(rowA).getByRole("button", { name: "테스트" }));
+    await waitFor(() => expect(within(rowA).getByText(/테스트 중/)).toBeInTheDocument());
+    expect(within(rowA).queryByText("미확인")).not.toBeInTheDocument();
+
+    resolveTest({ success: true, message: "ok" });
+    await waitFor(() => expect(within(rowA).getByText("연결 성공")).toBeInTheDocument());
+    expect(within(rowA).queryByText(/테스트 중/)).not.toBeInTheDocument();
+  });
+
+  it("form button transitions idle → 테스트 중 → 연결 실패: {message}", async () => {
+    vi.mocked(targetDbConfigApi.list).mockResolvedValue([]);
+    let resolveTest!: (value: { success: boolean; message: string }) => void;
+    vi.mocked(targetDbConfigApi.testConnection).mockImplementation(
+      () => new Promise((resolve) => (resolveTest = resolve)),
+    );
+
+    render(<TargetDbConfigPage />);
+    await waitFor(() => expect(screen.getByText(/등록된 대상 DB가 없습니다/)).toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "+ 새 대상 DB" }));
+    fireEvent.change(screen.getByLabelText("이름"), { target: { value: "X" } });
+    fireEvent.change(screen.getByLabelText("JDBC URL"), { target: { value: "jdbc:sqlserver://x;" } });
+    fireEvent.change(screen.getByLabelText("사용자명"), { target: { value: "u" } });
+    fireEvent.change(screen.getByLabelText(/^비밀번호/), { target: { value: "pw" } });
+
+    expect(screen.queryByText(/테스트 중|연결 성공|연결 실패/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "연결 테스트" }));
+    await waitFor(() => expect(screen.getByText(/테스트 중/)).toBeInTheDocument());
+
+    resolveTest({ success: false, message: "타임아웃" });
+    await waitFor(() => expect(screen.getByText("연결 실패: 타임아웃")).toBeInTheDocument());
+    expect(screen.queryByText(/테스트 중/)).not.toBeInTheDocument();
+  });
+});

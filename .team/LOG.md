@@ -511,3 +511,20 @@
 - 이 작업은 문서만 변경(코드 변경 없음). `mvn test` 123/123 재확인(회귀 없음, 당연히 영향 없었음을 재확인하는 차원).
 - DoD 점검: README를 처음 보는 사람이 그대로 따라가면 WAR 빌드→Tomcat 배치(ROOT.war)→환경변수 설정(setenv)→기동→확인까지 재현 가능한 수준으로 작성됨(T26에서 실제로 이 순서 그대로 로컬 Tomcat에 배치해 실측 검증한 내용을 그대로 문서화한 것이므로 가이드 자체가 재현성 검증을 거침).
 - T22~T27 전체 완료. 다음 라운드는 T28(future, 실행이력 테이블 — 이번 범위 제외, 별도 설계 라운드 필요).
+
+## 2026-11-18 — TASKS.md 번호 정리: T29~T32(future) → T28~T31(future) (worker)
+- PLAN.md §6/§7/§10과 TASKS.md T29~T31(대상DB 연결 테스트 기능, 커밋 8a75376)이 신설된 것을 확인. 작업 착수 전 TASKS.md를 다시 읽어보니 T27 다음 번호가 T28을 건너뛰고 바로 T29로 매겨져 있었음(신설 시점의 단순 번호 누락으로 보임) — 사용자 지시대로 내용은 그대로 두고 번호만 한 칸씩 당김: T29→T28(백엔드 연결테스트 API), T30→T29(프론트 버튼+뱃지), T31→T30(회귀테스트), future T32→T31(실행이력 테이블). 머리말 교정 문단과 future 섹션의 "착수 조건(T1~T31)" 문구도 같이 갱신. 레포 전체에서 T29~T32 문자열을 grep해 TASKS.md 외 다른 파일(PLAN.md, LOG.md, README.md)에 참조가 없음을 확인(LOG.md의 과거 T27 항목에 있는 "다음 라운드는 T28(future...)"는 2026-11-17 당시 — 이번 신설 전 — 기준으로 쓰인 역사적 기록이라 수정 대상 아님).
+- 로컬 커밋(`27f374c`, push 안 함).
+
+## 2026-11-18 — T28: 백엔드 — 대상 DB 연결 테스트 API 2개 (worker)
+- PLAN.md §6(2026-11-18 신규)/TASKS.md T28. 공용 컴포넌트 `infra/db/TargetDbConnectionTester`를 신설해 두 엔드포인트가 로직을 공유하도록 구현: `POST /api/config/target-db/test-connection`(바디로 jdbcUrl/username/password를 평문으로 받아 저장 없이 테스트만), `POST /api/config/target-db/{id}/test-connection`(id로 저장된 설정을 `TargetDbConfigRepository.findById`로 조회 — 이미 `CredentialCipher`로 복호화된 평문을 반환하므로 별도 복호화 호출 불필요). 둘 다 `TargetDbConfigController`에 추가, 응답은 공용 `ConnectionTestResponse(success, message)`.
+- `TargetDbConnectionTester.test()`: 커넥션 풀 없는 1회성 `DriverManager.getConnection` + `SELECT 1` + try-with-resources 즉시 close. `DriverManager.setLoginTimeout(5)`은 호출 전후로 이전 값을 저장/복원(JVM 전역 상태라 `StoredProcedureInvoker` 등 무관한 호출에 영향 주지 않게).
+- **에러 메시지 안전처리**: `SQLException`을 그대로 클라이언트에 넘기지 않고 `sqlState`/메시지 키워드(로그인 실패/타임아웃/연결 불가)로 분류해 고정된 한국어 문구로만 응답. 원본 예외(스택트레이스 포함)는 서버 로그에만 남기되, 비밀번호 문자열이 로그 메시지에 그대로 찍히는 경우를 막기 위해 방어적 치환(`rawMessage.replace(password, "***")`)을 추가.
+- **실측 검증 중 실제 버그 2건 발견(DoD의 "타임아웃이 실제로 적용되는지 측정해 확인" 요구가 바로 잡아낸 것들)**:
+  1. **방어적 치환의 부작용**: 테스트에서 1글자짜리 비밀번호("p")로 실패를 유도했더니, 로그 메시지의 "port"/"properties" 같은 평범한 단어 안의 "p"까지 치환되어 "***ort"/"***ro***erties"로 깨짐 — 짧은 문자열이 메시지 치환의 의도치 않은 충돌을 일으킴을 실측으로 발견. `MIN_REDACTABLE_PASSWORD_LENGTH=4` 미만이면 치환을 건너뛰도록 수정(실제 비밀번호는 보통 이보다 길고, 짧은 가짜 값에 로그가 깨지는 쪽보다 가독성을 택함).
+  2. **`DriverManager.setLoginTimeout`만으로는 타임아웃이 보장되지 않음**: 처음엔 RFC 5737 TEST-NET-3(203.0.113.1, 라우팅 불가 예약 주소)로 "타임아웃 측정" 테스트를 작성했는데, 실제로는 0.5초 안에 실패해서 타임아웃 적용 여부를 증명하지 못함(네트워크 환경에 따라 즉시 reject될 수 있어 검증력이 없는 테스트였음). 로컬 `ServerSocket`으로 "TCP 연결은 수락하지만 TDS 핸드셰이크에 응답하지 않는" 블랙홀 서버를 만들어 재시도했더니, 실제로 **20초(테스트 서버가 소켓을 닫을 때까지)** 를 꽉 채워서야 실패 — `setLoginTimeout`이 TCP connect 단계만 보장하고, 연결 수립 후 응답 없는 소켓 read 대기는 전혀 타임아웃이 걸려 있지 않았다는 뜻. mssql-jdbc의 커넥션 속성 `socketTimeout`(ms 단위, 개별 소켓 read마다 적용)을 `DriverManager.getConnection(url, Properties)` 방식으로 추가 설정해 이 간극을 메움. 수정 후 같은 블랙홀 테스트가 5초 안팎(4~15초 범위)에서 정확히 실패함을 재확인.
+- `backend/src/test/java/com/scheduler/web/api/TargetDbConnectionTestControllerTest.java`: `AbstractRepositoryIntegrationTest`가 띄우는 실제 MSSQL testcontainer를 "대상DB"로 재사용해 (1) 저장 전 입력값으로 실제 연결 성공, (2) 저장된 설정으로 실제 연결 성공, (3) 잘못된 비밀번호 → 실패 + 응답에 평문 비밀번호 미노출, (4) 블랙홀 소켓으로 5초 전후 타임아웃 실측(위 버그 수정의 재현 테스트) 4건.
+- `backend/src/test/java/com/scheduler/web/api/TargetDbConnectionTestAuthTest.java`: `AuthControllerTest`와 동일 패턴(`app.auth.disabled=false` 고정)으로 두 엔드포인트 모두 인증 없이 호출 시 401 확인 — `SecurityConfig` 변경 없이 기존 `/api/**` 보호 규칙에 자연히 포함됨을 실측 확인(별도 수정 불필요했음).
+- 이 작업 전 로컬 환경에 Docker Desktop이 기동되어 있지 않아 testcontainers 기반 테스트 전체(기존 123개 포함)가 `NoClassDefFoundError`로 실패하는 것을 발견 → Docker Desktop을 기동(사용자 세션 내 기존 설치본 실행)하고 준비될 때까지 대기 후 재실행 — 이 환경 이슈는 이번 작업의 코드와 무관한 환경 상태였음을 투명하게 남김.
+- `mvn test` 129/129 그린(기존 123 + 신규 6: 컨트롤러 4 + 인증 2).
+- DoD 점검: 저장된 설정 연결 성공 시 `{success:true}` 확인, 존재하지 않는 호스트(블랙홀 소켓)로 5초 전후 `{success:false}` 응답을 실측(타임아웃 강제 확인 — 위 버그 수정 포함), 실패 응답 `message`에 입력했던 비밀번호가 포함되지 않음을 테스트로 확인, 인증 없이 호출 시 401 확인. 다음 작업: T29(프론트엔드 연결 테스트 버튼 + 상태 뱃지).

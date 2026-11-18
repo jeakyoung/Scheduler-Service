@@ -5,8 +5,11 @@ import com.scheduler.domain.config.TargetDbConfigRepository;
 import com.scheduler.domain.schedule.ScheduleDefinition;
 import com.scheduler.domain.schedule.ScheduleRepository;
 import com.scheduler.domain.schedule.ScheduleTargetDbConfigRepository;
+import com.scheduler.infra.db.TargetDbConnectionTester;
+import com.scheduler.web.api.dto.ConnectionTestResponse;
 import com.scheduler.web.api.dto.TargetDbConfigRequest;
 import com.scheduler.web.api.dto.TargetDbConfigResponse;
+import com.scheduler.web.api.dto.TestConnectionRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -27,15 +30,18 @@ public class TargetDbConfigController {
     private final TargetDbConfigRepository targetDbConfigRepository;
     private final ScheduleRepository scheduleRepository;
     private final ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository;
+    private final TargetDbConnectionTester connectionTester;
 
     public TargetDbConfigController(
             TargetDbConfigRepository targetDbConfigRepository,
             ScheduleRepository scheduleRepository,
-            ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository
+            ScheduleTargetDbConfigRepository scheduleTargetDbConfigRepository,
+            TargetDbConnectionTester connectionTester
     ) {
         this.targetDbConfigRepository = targetDbConfigRepository;
         this.scheduleRepository = scheduleRepository;
         this.scheduleTargetDbConfigRepository = scheduleTargetDbConfigRepository;
+        this.connectionTester = connectionTester;
     }
 
     @GetMapping("/api/config/target-db")
@@ -78,6 +84,20 @@ public class TargetDbConfigController {
         }
 
         targetDbConfigRepository.deleteById(id);
+    }
+
+    /** PLAN.md §6 (2026-11-18) - test unsaved input directly, nothing is persisted. */
+    @PostMapping("/api/config/target-db/test-connection")
+    public ConnectionTestResponse testConnection(@Valid @RequestBody TestConnectionRequest request) {
+        return connectionTester.test(request.jdbcUrl(), request.username(), request.password());
+    }
+
+    /** PLAN.md §6 (2026-11-18) - test a saved config; the server decrypts, the client never sees the plaintext. */
+    @PostMapping("/api/config/target-db/{id}/test-connection")
+    public ConnectionTestResponse testConnectionById(@PathVariable long id) {
+        TargetDbConfig config = targetDbConfigRepository.findById(id)
+                .orElseThrow(() -> new java.util.NoSuchElementException("target_db_config " + id + " not found"));
+        return connectionTester.test(config.jdbcUrl(), config.username(), config.password());
     }
 
     private void requireExists(long id) {

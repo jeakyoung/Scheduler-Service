@@ -2,10 +2,11 @@
 
 > `.team/PLAN.md` 기준. 순서대로 구현한다(각 작업은 원칙적으로 앞 작업의 결과물 위에 쌓임).
 > 레거시(`C:\Users\USER\Desktop\scheduler-test\scheduler-test`)는 참고만 하고 수정하지 않는다.
-> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T28)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
+> **실행이력 테이블 설계/마이그레이션은 이번 범위에서 제외**하고 별도 future task(T32)로만 명시한다. 단, `ExecutionResult` 값 객체 + `ExecutionResultSink` 포트를 자리 잡는 것(T6)은 이번 범위에 포함된다.
 > **2026-11-13 3차 교정(사용자 직접 지시) 반영**: 관리자 화면은 Thymeleaf가 아니라 별도 React SPA(`frontend/`)로 구현한다. 백엔드(`backend/`)는 REST API만 제공한다. 이에 따라 레포를 `backend/`/`frontend/` 두 디렉터리로 분리하는 작업(T1)과 프론트엔드 스캐폴딩+CORS 연동(T2)을 별도 작업으로 추가했다.
 > **2026-11-16 교정(사용자 직접 지시) 반영**: PLAN.md에 3가지 신규 기능 — (1) 알람식 반복주기 입력 UI(§9), (2) 스케줄당 대상DB 다중 선택(§4.3b), (3) 대상DB별 모아보기(§7) — 가 추가됨에 따라, T1~T14(기존 범위) 뒤에 T15~T21을 이어서 추가한다. 스키마 변경(T15) → 도메인/엔진(T16~T17) → API(T18) → 프론트(T19~T20) → 회귀테스트(T21) 순서.
-> **2026-11-17 교정(사용자 직접 지시) 반영**: 실제 배포 가능한 인프라가 외부 Tomcat뿐이라는 제약에 따라 PLAN.md §11(배포 방식)이 신설됨 — "백엔드 jar+내장톰캣, 프론트 별도 배포"를 "Tomcat 단일 WAR" 배포로 전환. T21(기존 범위 마지막) 뒤에 T22~T27(WAR 전환/빌드 파이프라인 통합/SPA 폴백 라우팅/API 베이스 URL 상대경로화/로컬 개발 워크플로 회귀 확인/README 배포 가이드)을 이어서 추가한다. 기존 future task(실행이력 테이블)는 T28로 밀렸다.
+> **2026-11-17 교정(사용자 직접 지시) 반영**: 실제 배포 가능한 인프라가 외부 Tomcat뿐이라는 제약에 따라 PLAN.md §11(배포 방식)이 신설됨 — "백엔드 jar+내장톰캣, 프론트 별도 배포"를 "Tomcat 단일 WAR" 배포로 전환. T21(기존 범위 마지막) 뒤에 T22~T27(WAR 전환/빌드 파이프라인 통합/SPA 폴백 라우팅/API 베이스 URL 상대경로화/로컬 개발 워크플로 회귀 확인/README 배포 가이드)을 이어서 추가한다.
+> **2026-11-18 교정(사용자 직접 지시) 반영**: 대상 DB 설정 등록/관리 화면에 "연결 테스트(헬스체크)" 기능이 추가됨(PLAN.md §6/§7). T27(기존 범위 마지막) 뒤에 T29~T31(백엔드 연결 테스트 API 2개 → 프론트 테스트 버튼+상태뱃지 → 테스트)을 이어서 추가한다. 기존 future task(실행이력 테이블)는 T32로 밀렸다.
 
 ---
 
@@ -310,10 +311,47 @@
 
 ---
 
+### T29. 백엔드 — 대상 DB 연결 테스트 API 2개 (PLAN.md §6)
+
+- `TargetDbConfigController`(또는 신규 서비스 `TargetDbConnectionTester`)에 다음 두 엔드포인트 추가:
+  - `POST /api/config/target-db/test-connection` — 바디로 `jdbcUrl`/`username`/`password`(평문)를 직접 받아 저장하지 않고 테스트만 한다.
+  - `POST /api/config/target-db/{id}/test-connection` — id로 저장된 `target_db_config`를 조회해 `CredentialCipher.decrypt`로 복호화한 뒤 같은 테스트 로직을 재사용한다.
+  - 두 엔드포인트의 테스트 로직(연결 시도/타임아웃/결과 가공)은 공용 컴포넌트 하나로 구현해 중복을 피한다.
+- 연결 시도는 커넥션 풀 없는 1회성 `DriverManager.getConnection(jdbcUrl, username, password)` + 성공 시 `SELECT 1` 확인 + try-with-resources로 즉시 close. `DriverManager.setLoginTimeout(3~5초)`로 짧은 타임아웃을 강제한다.
+- 응답은 `{success: boolean, message: string}` 공통 DTO 하나로 통일한다(두 엔드포인트가 같은 응답 타입 재사용).
+- **에러 메시지 안전처리**: `SQLException`을 그대로 클라이언트에 노출하지 않는다 — 접속정보(URL/비밀번호)가 메시지에 포함돼 있지 않은지 확인하고, 필요하면 알려진 실패 유형(타임아웃/인증실패/호스트 unreachable 등)별로 안전한 고정 문구로 매핑한다. 원본 예외(스택트레이스 포함)는 서버 로그에만 남기되, 로그에도 평문 비밀번호가 찍히지 않도록 주의한다(로그 출력 전에 비밀번호 문자열이 포함돼 있지 않은지 코드 리뷰로 확인).
+- 두 엔드포인트 모두 기존 Spring Security `/api/**` 보호 규칙에 자연히 포함되는지 확인(별도 `SecurityConfig` 변경이 필요 없어야 함 — 필요하다면 그 자체가 버그).
+- DB 컬럼/테이블 변경 없음(Flyway 마이그레이션 추가하지 않음) — PLAN.md §6의 "영속화하지 않음" 결정 그대로.
+
+**DoD**: 저장된 설정으로 연결 성공 시 `{success: true}` 응답. 존재하지 않는 호스트/닫힌 포트로 연결 시도 시 3~5초 안에 `{success: false, message: "..."}` 응답(타임아웃이 실제로 적용되는지 측정해 확인). 두 엔드포인트의 실패 응답 `message`에 입력했던 비밀번호 문자열이 그대로 포함되지 않음을 테스트로 확인. 인증 없이 호출 시 401/403.
+
+---
+
+### T30. 프론트엔드 — 연결 테스트 버튼 + 상태 뱃지 (PLAN.md §7)
+
+- `frontend/src/api/targetDbConfigs.ts`(또는 동급 클라이언트)에 `testConnection(input)`과 `testConnectionById(id)` 메서드 추가.
+- `TargetDbConfigPage.tsx` 생성/수정 폼에 "연결 테스트" 버튼 추가: 클릭 시 현재 폼 입력값으로 `testConnection` 호출 → 결과를 폼 안에 인라인으로 초록 "연결 성공"/빨강 "연결 실패: {message}"로 표시(로딩 중 상태도 표시).
+- 목록 테이블에 "연결 상태" 컬럼 추가: 각 행에 상태 뱃지(초록=성공/빨강=실패/회색=미확인) + "테스트" 버튼. 뱃지 상태는 각 `target_db_config.id`별 React 로컬 state(`Record<number, "unknown" | "testing" | "success" | "failure">` + 실패 시 메시지)로 관리하고, 페이지 로드 시에는 전부 "미확인"으로 시작한다(자동 호출 없음 — PLAN.md §6/§7 근거). "테스트" 버튼 클릭 시에만 `testConnectionById`를 호출해 해당 행의 뱃지를 채운다.
+- 뱃지 상태는 영속화하지 않는다(새로고침하면 "미확인"으로 리셋) — 별도 전역 상태 저장소/캐시를 두지 않는다.
+
+**DoD**: 생성/수정 폼에서 "연결 테스트" 클릭 시 저장 없이 결과가 인라인으로 뜬다(성공/실패 둘 다 수동 확인). 목록의 각 행에서 "테스트" 클릭 시 해당 행의 뱃지만 갱신되고 다른 행에는 영향 없음. 페이지를 새로고침하면 모든 뱃지가 "미확인"으로 돌아온다.
+
+---
+
+### T31. 테스트 — 연결 테스트 기능 회귀 확인
+
+- 백엔드: 연결 성공/연결 실패(잘못된 자격증명 또는 존재하지 않는 DB)/타임아웃(존재하지 않는 호스트 또는 느린 응답) 3가지 케이스에 대한 단위/통합 테스트. 실패 응답 메시지에 비밀번호 평문이 포함되지 않는지 검증하는 테스트 포함.
+- 프론트: 폼의 "연결 테스트" 버튼과 목록의 행별 "테스트" 버튼 각각에 대해 미확인→테스트중→성공/실패 상태 전환이 올바르게 렌더링되는지 테스트.
+- 기존 `target_db_config` CRUD 테스트(T10 등)가 이번 변경으로 깨지지 않았는지 회귀 확인.
+
+**DoD**: 위 테스트들이 모두 통과하고 `mvn test`/프론트 테스트 스위트 전체가 그린 상태 유지.
+
+---
+
 ## Future (이번 범위 제외, 별도 라운드)
 
-### T28 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
+### T32 (future). 실행이력 테이블 설계 + 마이그레이션 + `JdbcExecutionResultSink`
 
 - PLAN.md §3.1/§3.2, §10(TBD 명시)에 따라 실행이력 테이블 스키마를 별도로 설계(감시 서버 원칙: 상태/요약만, SP 전체 결과행 보존 금지. 실패 기록 포함 — 대상DB별 세부결과(`TargetDbExecutionResult`, T17)도 영속화 대상에 포함할지 이 라운드에서 결정).
 - `ExecutionResultSink`의 새 구현(`JdbcExecutionResultSink` 등)을 추가하고 `LoggingExecutionResultSink`와 조합(`CompositeExecutionResultSink`) 또는 교체.
-- **착수 조건**: 이번 TASKS.md 범위(T1~T27) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.
+- **착수 조건**: 이번 TASKS.md 범위(T1~T31) 완료 후, 별도로 이력 테이블 스키마 설계 라운드를 거친 뒤 진행.

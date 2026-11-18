@@ -81,6 +81,17 @@ public class TargetDbConnectionTester {
         if (lower.contains("login failed")) {
             return "인증에 실패했습니다. 사용자명 또는 비밀번호를 확인하세요.";
         }
+        // Must be checked before the timeout/tcp-ip categories below: mssql-jdbc's SSL/PKIX
+        // failure message reads "...could not establish a secure connection to SQL Server by
+        // using Secure Sockets Layer (SSL) encryption. Error: "PKIX path building failed: ..."
+        // - the word "connection" in there would otherwise match the tcp-ip category's
+        // "connect" keyword first and misreport this as a plain network-reachability problem,
+        // hiding the actual (and very common) "server has no trusted SSL cert" cause.
+        if (lower.contains("pkix") || lower.contains("sslhandshake") || lower.contains("ssl")
+                || lower.contains("certificate") || lower.contains("encrypt")) {
+            return "서버와 SSL 암호화 연결을 수립할 수 없습니다. 대상 서버에 유효한 SSL 인증서가 없다면, "
+                    + "JDBC URL 끝에 ;encrypt=false;trustServerCertificate=true; 를 추가해 보세요.";
+        }
         if (lower.contains("timeout") || lower.contains("timed out")) {
             return "연결 시간이 초과되었습니다. 호스트/포트 또는 네트워크 상태를 확인하세요.";
         }

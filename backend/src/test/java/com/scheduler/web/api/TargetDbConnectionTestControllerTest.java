@@ -134,4 +134,63 @@ class TargetDbConnectionTestControllerTest extends AbstractRepositoryIntegration
             // Server socket closed (test method returning) or JVM shutting down - expected.
         }
     }
+
+    /**
+     * Real repro, not a crafted message: MSSQLServerContainer auto-sets "encrypt=false" unless
+     * the caller requests encryption explicitly (confirmed by decompiling
+     * MSSQLServerContainer.getJdbcUrl() - it checks urlParameters.noneMatch(... "encrypt" ...)
+     * and defaults to "false"), which is why simply dropping ";trustServerCertificate=true"
+     * still connected fine in an earlier version of this test - no TLS negotiation happens at
+     * all with encrypt=false. Forcing ";encrypt=true;" (without trustServerCertificate) turns
+     * TLS validation back on against the container's self-signed cert, reproducing mssql-jdbc's
+     * genuine PKIX/SSLHandshakeException path - exactly the case a user hit against a real
+     * target DB with encrypt=true and no valid cert.
+     */
+    @Test
+    void sslCertificateFailureGetsAnSslSpecificMessageNotTheGenericConnectFailureMessage() throws Exception {
+        String urlWithUntrustedEncryption = containerJdbcUrl.replace(";trustServerCertificate=true;", ";encrypt=true;");
+
+        String response = mockMvc.perform(post("/api/config/target-db/test-connection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"jdbcUrl":"%s","username":"%s","password":"%s"}
+                                """.formatted(urlWithUntrustedEncryption, containerUsername, containerPassword)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).contains("SSL");
+        assertThat(response).contains("encrypt=false;trustServerCertificate=true;");
+        // The real bug this was fixed for: the SSL message contains the word "connection" (from
+        // "...establish a secure connection..."), which would wrongly match the generic
+        // tcp-ip/"connect" category's keyword if that category were checked first.
+        assertThat(response).doesNotContain("서버에 연결할 수 없습니다");
+    }
+
+    /**
+     * Regression guard for the three categories that existed before the SSL category was added
+     * above - login-failed (wrongPasswordFailsWithoutLeakingItInTheResponse) and timeout
+     * (unreachableHostFailsWithinEnforcedTimeout) are covered by the existing tests in this
+     * class; this covers the third ("연결불가"/connection-refused) category, which a closed
+     * local port reproduces deterministically and near-instantly (no SSL keywords appear in a
+     * plain "Connection refused" message, so it must still fall through to this category).
+     */
+    @Test
+    void connectionRefusedStillMapsToTheGenericUnreachableCategory() throws Exception {
+        int closedPort;
+        try (ServerSocket socket = new ServerSocket(0)) {
+            closedPort = socket.getLocalPort();
+        }
+
+        String response = mockMvc.perform(post("/api/config/target-db/test-connection")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"jdbcUrl":"jdbc:sqlserver://localhost:%d;trustServerCertificate=true;","username":"u","password":"p"}
+                                """.formatted(closedPort)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.success").value(false))
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).contains("서버에 연결할 수 없습니다");
+    }
 }

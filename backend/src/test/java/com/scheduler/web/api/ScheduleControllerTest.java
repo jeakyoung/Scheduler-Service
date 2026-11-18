@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.scheduler.domain.config.TargetDbConfig;
 import com.scheduler.domain.config.TargetDbConfigRepository;
+import com.scheduler.domain.schedule.ScheduleRepository;
 import com.scheduler.engine.quartz.AbstractQuartzIntegrationTest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -40,6 +41,9 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
 
     @Autowired
     private TargetDbConfigRepository targetDbConfigRepository;
+
+    @Autowired
+    private ScheduleRepository scheduleRepository;
 
     @Autowired
     private Scheduler scheduler;
@@ -139,6 +143,88 @@ class ScheduleControllerTest extends AbstractQuartzIntegrationTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(apiCallRequestBody(true, "not a cron")))
                 .andExpect(status().isBadRequest());
+    }
+
+    /**
+     * User-reported bug: a one-time cron (CronBuilder pattern #6, year-pinned) whose date/time
+     * has already passed is syntactically valid but will never fire - it used to get saved and
+     * only fail later at Quartz registration with an unmapped QuartzRegistrationException,
+     * leaking out as a bare 500. Year 2000 is always in the past regardless of when this test
+     * runs, so this isn't time-of-test-run flaky.
+     */
+    @Test
+    void createWithPastOneTimeCronIsBadRequestNotServerError() throws Exception {
+        String response = mockMvc.perform(post("/api/schedules")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(apiCallRequestBody(true, "0 0 9 1 1 ? 2000")))
+                .andExpect(status().isBadRequest())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).contains("선택한 날짜/시간이 이미 지나서 스케줄이 실행될 수 없습니다");
+    }
+
+    /** Regression guard: the same one-time pattern with a future year must still work normally. */
+    @Test
+    void createWithFutureOneTimeCronSucceeds() throws Exception {
+        mockMvc.perform(post("/api/schedules")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(apiCallRequestBody(true, "0 0 9 1 1 ? 2099")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.nextFireTime").value(notNullValue()));
+    }
+
+    /**
+     * Regression guard: the new "will it ever fire" pre-check must not reject any of
+     * CronBuilder's other 5 recurring patterns (PLAN.md §9.2) - every one of these always has
+     * *some* future fire time by construction, so none should be affected by this change.
+     */
+    @Test
+    void createWithRecurringCronPatternsStillSucceeds() throws Exception {
+        List<String> recurringPatterns = List.of(
+                "0 0 9 * * ?",             // 일별 (daily)
+                "0 0 9 15 * ?",             // 월별 (monthly on the 15th)
+                "0 0 9 ? * MON,WED,FRI",    // 요일반복 (weekday repeat)
+                "0 0/30 8-18 ? * MON-FRI"   // 간격반복 (interval within a window)
+        );
+
+        for (String cron : recurringPatterns) {
+            mockMvc.perform(post("/api/schedules")
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content(apiCallRequestBody(true, cron)))
+                    .andExpect(status().isCreated())
+                    .andExpect(jsonPath("$.nextFireTime").value(notNullValue()));
+        }
+    }
+
+    /**
+     * Exercises the ApiExceptionHandler safety net (QuartzRegistrationException -> 400)
+     * directly, for the path ScheduleController.validateCron can't cover: a schedule that was
+     * already stored (bypassing the controller, same as if it had been saved before this fix
+     * shipped) with a now-unfireable cron, re-registered via PATCH .../enabled.
+     */
+    @Test
+    void reEnablingAStoredScheduleWithAnUnfireableCronIsBadRequestNotServerError() throws Exception {
+        var schedule = scheduleRepository.save(new com.scheduler.domain.schedule.ScheduleDefinition(
+                null, "Already past", false, "0 0 9 1 1 ? 2000", "Asia/Seoul",
+                "SP_SAMPLE", com.scheduler.domain.schedule.ActionType.DISPLAY_ONLY,
+                com.scheduler.domain.schedule.ActionConfigJson.write(
+                        new com.scheduler.domain.schedule.DisplayOnlyActionConfig(null, null)),
+                null, null, null, "tester"
+        ));
+
+        String response = mockMvc.perform(patch("/api/schedules/" + schedule.id() + "/enabled")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"enabled\": true}"))
+                .andExpect(status().isBadRequest())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(response).contains("선택한 날짜/시간이 이미 지나서 스케줄이 실행될 수 없습니다");
+
+        // Found while writing this test (not what it originally set out to check): without
+        // @Transactional on setEnabled(), updateEnabled(...) had already committed enabled=true
+        // before register() threw, permanently stranding a schedule that ScheduleBootstrapRunner
+        // would then crash on at every future app restart. Confirms the rollback actually works.
+        assertThat(scheduleRepository.findById(schedule.id()).orElseThrow().enabled()).isFalse();
     }
 
     @Test
